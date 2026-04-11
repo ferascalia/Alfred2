@@ -78,3 +78,15 @@ async def jobs_nudge(request: Request) -> dict[str, object]:
     from alfred.jobs.nudge import process_nudge
     result = await process_nudge(contact_id=contact_id)
     return result
+
+
+@app.post("/jobs/digest", dependencies=[Depends(_check_jobs_secret)])
+async def jobs_digest(request: Request) -> dict[str, object]:
+    body = await request.json()
+    user_id: str = body.get("user_id", "")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+
+    from alfred.jobs.digest import process_digest
+    result = await process_digest(user_id=user_id)
+    return result
