@@ -143,6 +143,36 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["contact_id", "purpose"],
         },
     },
+    {
+        "name": "merge_contacts",
+        "description": "Mescla dois contatos duplicados. Move todas as memórias, interações e nudges do duplicado para o principal, depois arquiva o duplicado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "primary_id": {"type": "string", "description": "ID do contato que será mantido"},
+                "duplicate_id": {"type": "string", "description": "ID do contato duplicado que será arquivado"},
+            },
+            "required": ["primary_id", "duplicate_id"],
+        },
+    },
+    {
+        "name": "create_contact_confirmed",
+        "description": "Cria um contato mesmo que já exista alguém com nome similar. Use apenas quando o usuário confirmar que são pessoas diferentes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "display_name": {"type": "string"},
+                "aliases": {"type": "array", "items": {"type": "string"}},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "how_we_met": {"type": "string"},
+                "relationship_type": {"type": "string", "enum": ["friend", "professional", "family", "other"]},
+                "company": {"type": "string"},
+                "role": {"type": "string"},
+                "cadence_days": {"type": "integer", "default": 30},
+            },
+            "required": ["display_name"],
+        },
+    },
 ]
 
 
@@ -193,5 +223,13 @@ async def dispatch_tool(
     if tool_name == "draft_message":
         from alfred.services.contacts import draft_message
         return await draft_message(user_id=user_id, **tool_input)
+
+    if tool_name == "merge_contacts":
+        from alfred.services.contacts import merge_contacts
+        return await merge_contacts(user_id=user_id, **tool_input)
+
+    if tool_name == "create_contact_confirmed":
+        from alfred.services.contacts import create_contact_confirmed
+        return await create_contact_confirmed(user_id=user_id, **tool_input)
 
     return f"Ferramenta '{tool_name}' não reconhecida."
