@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Lint with ruff
+        run: uv run ruff check alfred/
+
+      - name: Type check with mypy
+        run: uv run mypy alfred/ --ignore-missing-imports
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+        env:
+          # Tests use mocks — no real credentials needed
+          TELEGRAM_BOT_TOKEN: "test:token"
+          ANTHROPIC_API_KEY: "test-key"
+          VOYAGE_API_KEY: "test-key"
+          SUPABASE_URL: "https://test.supabase.co"
+          SUPABASE_SERVICE_ROLE_KEY: "test-key"
+          WEBHOOK_URL: "https://test.railway.app"
+          WEBHOOK_SECRET: "test-secret"
+          JOBS_SECRET: "test-jobs-secret"

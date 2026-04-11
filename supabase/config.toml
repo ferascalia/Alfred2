@@ -1,0 +1,12 @@
+[project]
+# Fill in after creating your Supabase project
+id = "your-project-ref"
+
+[api]
+port = 54321
+
+[db]
+port = 54322
+
+[studio]
+port = 54323
