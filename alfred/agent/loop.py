@@ -1,5 +1,6 @@
 """Agent loop with tool use."""
 import structlog
+from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from anthropic.types import MessageParam, TextBlock, ToolResultBlockParam, ToolUseBlock
 
 from alfred.agent.client import MAX_TOKENS, MODEL, get_anthropic
@@ -8,6 +9,17 @@ from alfred.agent.tools import TOOL_SCHEMAS, dispatch_tool
 from alfred.db.client import get_db
 
 log = structlog.get_logger()
+
+
+async def _alert_owner(telegram_id: int, message: str) -> None:
+    """Send an urgent alert to the user via Telegram."""
+    try:
+        from telegram import Bot
+        from alfred.config import settings
+        bot = Bot(token=settings.telegram_bot_token)
+        await bot.send_message(chat_id=telegram_id, text=message, parse_mode="Markdown")
+    except Exception:
+        log.exception("alert.failed", telegram_id=telegram_id)
 
 
 async def _get_or_create_user(telegram_id: int, user_name: str) -> str:
@@ -98,19 +110,35 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
 
     # Agentic loop — keep going until we get a stop_turn with no tool calls
     for _turn in range(10):  # max 10 tool rounds
-        response = await client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=[
-                {
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            tools=TOOL_SCHEMAS,  # type: ignore[arg-type]
-            messages=messages,
-        )
+        try:
+            response = await client.messages.create(
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                system=[
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                tools=TOOL_SCHEMAS,  # type: ignore[arg-type]
+                messages=messages,
+            )
+        except RateLimitError:
+            log.warning("anthropic.rate_limit")
+            return "Estou sobrecarregado no momento, tente em alguns minutos. 🔄"
+        except APIStatusError as exc:
+            log.error("anthropic.api_error", status=exc.status_code)
+            if exc.status_code == 402:
+                await _alert_owner(
+                    telegram_id,
+                    "⚠️ *Alerta Alfred*: Créditos da Anthropic esgotados. O assistente está fora do ar até você recarregar em https://console.anthropic.com.",
+                )
+                return "Meus créditos acabaram. Já te avisei por aqui — recarrega lá no console da Anthropic para eu voltar. 💳"
+            return "Ocorreu um erro no servidor, tente novamente. 🛠️"
+        except APIConnectionError:
+            log.error("anthropic.connection_error")
+            return "Não consegui conectar ao servidor, tente novamente. 🔌"
 
         log.info(
             "agent.response",
