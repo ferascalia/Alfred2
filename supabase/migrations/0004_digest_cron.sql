@@ -32,11 +32,11 @@ end;
 $$;
 
 -- ─────────────────────────────────────────
--- SCHEDULE: every Monday at 11:00 UTC (08:00 BRT)
+-- SCHEDULE: Monday and Thursday at 11:00 UTC (08:00 BRT)
 -- ─────────────────────────────────────────
 select cron.schedule(
     'alfred-digest-weekly',
-    '0 11 * * 1',
+    '0 11 * * 1,4',
     'select digest_scan()'
 );
 
