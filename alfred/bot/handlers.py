@@ -1,3 +1,5 @@
+import asyncio
+
 import structlog
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -49,17 +51,26 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     log.info("message.received", telegram_id=tg_user.id, length=len(text))
 
-    # Show typing indicator
-    await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id,  # type: ignore[union-attr]
-        action="typing",
-    )
+    chat_id = update.effective_chat.id  # type: ignore[union-attr]
 
-    response = await run_agent(
-        telegram_id=tg_user.id,
-        user_name=tg_user.full_name,
-        message=text,
-    )
+    async def keep_typing() -> None:
+        try:
+            while True:
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            pass
+
+    typing_task = context.application.create_task(keep_typing())
+    try:
+        response = await run_agent(
+            telegram_id=tg_user.id,
+            user_name=tg_user.full_name,
+            message=text,
+        )
+    finally:
+        typing_task.cancel()
+        await asyncio.sleep(0)
 
     await update.message.reply_text(response, parse_mode="Markdown")
 

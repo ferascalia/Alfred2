@@ -58,8 +58,7 @@ async def webhook(request: Request) -> Response:
     body = await request.body()
     update = Update.de_json(json.loads(body), _ptb_app.bot)  # type: ignore[union-attr]
 
-    async with _ptb_app:  # type: ignore[union-attr]
-        await _ptb_app.process_update(update)  # type: ignore[union-attr]
+    await _ptb_app.process_update(update)  # type: ignore[union-attr]
 
     return Response(status_code=200)
 
