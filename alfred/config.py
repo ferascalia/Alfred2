@@ -26,5 +26,8 @@ class Settings(BaseSettings):
     # Jobs
     jobs_secret: str = ""
 
+    # Groq (Whisper)
+    groq_api_key: str = ""
+
 
 settings = Settings()  # type: ignore[call-arg]

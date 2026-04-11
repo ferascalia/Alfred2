@@ -6,7 +6,7 @@ from telegram.ext import (
     filters,
 )
 
-from alfred.bot.handlers import callback_handler, message_handler, start_handler
+from alfred.bot.handlers import callback_handler, message_handler, start_handler, voice_handler
 from alfred.config import settings
 
 
@@ -22,6 +22,9 @@ def build_application() -> Application:  # type: ignore[type-arg]
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)
+    )
+    app.add_handler(
+        MessageHandler(filters.VOICE | filters.AUDIO, voice_handler)
     )
 
     return app

@@ -75,6 +75,53 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(response, parse_mode="Markdown")
 
 
+async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+
+    voice = update.message.voice or update.message.audio
+    if not voice:
+        return
+
+    from alfred.agent.loop import run_agent
+    from alfred.bot.voice import transcribe_voice
+
+    tg_user = update.effective_user
+    chat_id = update.effective_chat.id  # type: ignore[union-attr]
+
+    log.info("voice.received", telegram_id=tg_user.id, duration=getattr(voice, "duration", 0))
+
+    async def keep_typing() -> None:
+        try:
+            while True:
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            pass
+
+    typing_task = context.application.create_task(keep_typing())
+    try:
+        text = await transcribe_voice(voice.file_id)
+        log.info("voice.transcribed_text", text=text[:100])
+
+        response = await run_agent(
+            telegram_id=tg_user.id,
+            user_name=tg_user.full_name,
+            message=text,
+        )
+    except Exception:
+        log.exception("voice.error")
+        response = "Não consegui processar o áudio. Pode tentar de novo ou escrever?"
+    finally:
+        typing_task.cancel()
+        await asyncio.sleep(0)
+
+    await update.message.reply_text(
+        f"🎙️ _{text}_\n\n{response}" if "text" in dir() else response,
+        parse_mode="Markdown",
+    )
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.data:
