@@ -154,7 +154,8 @@ begin
     update contacts
     set
         last_interaction_at = p_happened_at,
-        next_nudge_at = p_happened_at + (v_cadence || ' days')::interval
+        -- Normaliza para meia-noite UTC para garantir que o scan de 11:00 UTC sempre pega
+        next_nudge_at = date_trunc('day', p_happened_at + (v_cadence || ' days')::interval)
     where id = p_contact_id;
 end;
 $$;
