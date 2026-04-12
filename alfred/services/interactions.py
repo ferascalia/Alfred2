@@ -38,11 +38,11 @@ async def log_interaction(
         "happened_at": happened_at_iso,
     }).execute()
 
-    # Update contact's last_interaction_at and next_nudge_at
-    db.rpc("update_contact_after_interaction", {
-        "p_contact_id": contact_id,
-        "p_happened_at": happened_at_iso,
-    }).execute()
+    # Atualiza apenas last_interaction_at — next_nudge_at é responsabilidade do
+    # set_follow_up (follow-up específico) ou do botão "Já falei" (cadência padrão)
+    db.table("contacts").update({
+        "last_interaction_at": happened_at_iso,
+    }).eq("id", contact_id).eq("user_id", user_id).execute()
 
     log.info("interaction.logged", user_id=user_id, contact_id=contact_id, channel=channel)
     return f"Interação registrada: {summary[:80]}..."

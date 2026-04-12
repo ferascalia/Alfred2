@@ -93,7 +93,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "log_interaction",
-        "description": "Registra uma interação com um contato (conversa, encontro, ligação, etc.).",
+        "description": "Registra uma interação com um contato (conversa, encontro, ligação, etc.). Atualiza apenas o histórico — não agenda o próximo contato. Se o usuário mencionar um prazo ('em 2 dias', 'semana que vem'), chame set_follow_up logo depois.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -157,7 +157,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "set_follow_up",
-        "description": "Marca um follow-up para um contato em uma data específica. Use quando o usuário disser 'me lembra de falar com X na sexta', 'follow-up em 10 dias', 'fala comigo sobre Y em 20/04', etc.",
+        "description": "Marca um follow-up para um contato em uma data específica. Use quando o usuário disser 'me lembra de falar com X na sexta', 'follow-up em 10 dias', 'preciso falar com ele em 2 dias', etc. Sempre chame APÓS log_interaction quando ambos forem necessários no mesmo turno.",
         "input_schema": {
             "type": "object",
             "properties": {
