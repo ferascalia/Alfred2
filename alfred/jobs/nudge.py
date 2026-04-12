@@ -138,5 +138,9 @@ Retorne EXATAMENTE neste formato JSON (sem markdown):
         reply_markup=nudge_keyboard(nudge_id),
     )
 
+    # Clear next_nudge_at so the scan doesn't re-fire every day until the user acts.
+    # It will be recalculated when the user clicks "Já falei" (update_contact_after_interaction).
+    db.table("contacts").update({"next_nudge_at": None}).eq("id", contact_id).execute()
+
     log.info("nudge.sent", contact_id=contact_id, nudge_id=nudge_id, telegram_id=telegram_id)
     return {"nudge_id": nudge_id, "contact_id": contact_id, "status": "sent"}

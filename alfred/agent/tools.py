@@ -156,6 +156,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "set_follow_up",
+        "description": "Marca um follow-up para um contato em uma data específica. Use quando o usuário disser 'me lembra de falar com X na sexta', 'follow-up em 10 dias', 'fala comigo sobre Y em 20/04', etc.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "contact_id": {"type": "string"},
+                "date": {"type": "string", "description": "Data do follow-up no formato YYYY-MM-DD (ex: '2026-04-20')"},
+                "note": {"type": "string", "description": "Opcional: motivo ou contexto do follow-up (ex: 'perguntar sobre o novo emprego')"},
+            },
+            "required": ["contact_id", "date"],
+        },
+    },
+    {
         "name": "create_contact_confirmed",
         "description": "Cria um contato mesmo que já exista alguém com nome similar. Use apenas quando o usuário confirmar que são pessoas diferentes.",
         "input_schema": {
@@ -223,6 +236,10 @@ async def dispatch_tool(
     if tool_name == "draft_message":
         from alfred.services.contacts import draft_message
         return await draft_message(user_id=user_id, **tool_input)
+
+    if tool_name == "set_follow_up":
+        from alfred.services.contacts import set_follow_up
+        return await set_follow_up(user_id=user_id, **tool_input)
 
     if tool_name == "merge_contacts":
         from alfred.services.contacts import merge_contacts

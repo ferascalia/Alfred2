@@ -174,6 +174,38 @@ async def set_cadence(user_id: str, contact_id: str, days: int) -> str:
     return f"Cadência definida para {days} dias."
 
 
+async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | None = None) -> str:
+    """Set a specific follow-up date for a contact (overrides next_nudge_at)."""
+    from datetime import date as date_type
+
+    try:
+        parsed = date_type.fromisoformat(date)
+    except ValueError:
+        return f"Data inválida: '{date}'. Use o formato YYYY-MM-DD (ex: '2026-04-20')."
+
+    db = get_db()
+    contact_result = (
+        db.table("contacts")
+        .select("display_name")
+        .eq("id", contact_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    if not contact_result.data:
+        return "Contato não encontrado."
+
+    name = contact_result.data["display_name"]
+    # Set next_nudge_at to midnight UTC on the target date — the 08:00 UTC scan will catch it
+    next_nudge_at = f"{parsed.isoformat()}T00:00:00+00:00"
+
+    db.table("contacts").update({"next_nudge_at": next_nudge_at}).eq("id", contact_id).eq("user_id", user_id).execute()
+
+    log.info("follow_up.set", user_id=user_id, contact_id=contact_id, date=date)
+    note_str = f" — motivo: {note}" if note else ""
+    return f"Follow-up marcado para **{name}** no dia {parsed.strftime('%d/%m/%Y')}{note_str}."
+
+
 async def archive_contact(user_id: str, contact_id: str) -> str:
     db = get_db()
     db.table("contacts").update({"status": "archived"}).eq("id", contact_id).eq("user_id", user_id).execute()

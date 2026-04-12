@@ -98,6 +98,12 @@ async def _save_message(user_id: str, role: str, content: object) -> None:
 
 async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     """Run one agent turn. Returns the text response."""
+    from datetime import datetime, timezone, timedelta
+    brt = timezone(timedelta(hours=-3))
+    now = datetime.now(brt)
+    current_date_str = now.strftime("%Y-%m-%d (%A, %H:%M BRT)")  # ex: "2026-04-12 (Sunday, 08:30 BRT)"
+    system_prompt = SYSTEM_PROMPT + f"\n\n## Data e hora atual\nHoje é {current_date_str}. Use sempre esta data/hora como referência ao registrar interações (happened_at) ou calcular follow-ups. Nunca use datas do passado para happened_at — use a data de hoje salvo o usuário dizer explicitamente outra."
+
     user_id = await _get_or_create_user(telegram_id, user_name)
     history = await _load_history(user_id)
 
@@ -117,7 +123,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 system=[
                     {
                         "type": "text",
-                        "text": SYSTEM_PROMPT,
+                        "text": system_prompt,
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
