@@ -132,6 +132,186 @@ def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[s
     return missing
 
 
+# ───────────────────────────────────────────────────────────────
+# Validador de veracidade da RESPOSTA — cruza com fonte confiável (DB)
+# ───────────────────────────────────────────────────────────────
+
+# Se Claude usa essas frases, ele está afirmando ter executado a tool correspondente.
+# Se a tool não foi chamada neste turno, é alucinação.
+_CLAIM_PATTERNS: dict[str, list[str]] = {
+    "create_contact": [
+        r"\b(cadastrei|criei|adicionei|registrei)\s+(o\s+|a\s+)?(contato|pessoa)\b",
+        r"\bcontato\s+(criado|cadastrado|adicionado)\b",
+        r"\bj(á|a)\s+(est(á|a)|foi)\s+(cadastrad[oa]|adicionad[oa]|criad[oa])\b",
+        r"\badicionei\s+(à|a)\s+(sua\s+)?(lista|base)\b",
+    ],
+    "log_interaction": [
+        r"\b(registrei|anotei|salvei|gravei)\s+(a\s+)?(intera(ç|c)(ã|a)o|conversa|encontro|reuni(ã|a)o)\b",
+        r"\bintera(ç|c)(ã|a)o\s+(registrada|gravada|anotada)\b",
+    ],
+    "set_follow_up": [
+        r"\b(marquei|agendei|programei|criei)\s+(o\s+|um\s+)?follow[\s-]?up\b",
+        r"\bfollow[\s-]?up\s+(marcad[oa]|agendad[oa]|criad[oa])\b",
+        r"\blembrete\s+(criad[oa]|marcad[oa]|agendad[oa])\b",
+        r"\bte\s+(lembro|lembrarei|aviso|avisarei)\s+(em|no\s+dia|na\s+|amanh(ã|a)|quando)",
+    ],
+    "set_cadence": [
+        r"\bcad(ê|e)ncia\s+(definida|configurada|criada|atualizada)\b",
+        r"\bvou\s+(te\s+)?lembrar\s+tod[oa]s?\s+",
+    ],
+    "add_memory": [
+        r"\b(adicionei|salvei|registrei|anotei)\s+(a\s+|uma\s+|essa\s+|esta\s+)?mem(ó|o)ria\b",
+        r"\bmem(ó|o)ria\s+(adicionada|salva|registrada|gravada)\b",
+    ],
+}
+
+_NAME_RE = re.compile(
+    r"\b([A-ZÀ-Úa-zà-ú]*[A-ZÀ-Ú][a-zà-ú]{2,}"
+    r"(?:\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+|e\s+)?[A-ZÀ-Ú][a-zà-ú]+)*)\b"
+)
+
+# Palavras Title Case que NÃO são nomes de contato — evita falso positivo
+_NAME_STOPWORDS: set[str] = {
+    "Alfred", "Claude", "Anthropic", "Telegram", "WhatsApp",
+    "Sim", "Não", "Nao", "Ok", "Okay", "Olá", "Ola", "Oi", "Feito", "Pronto", "Certo",
+    "Obrigado", "Obrigada", "Opa", "Eba", "Entendi", "Beleza",
+    "Segunda", "Terça", "Terca", "Quarta", "Quinta", "Sexta", "Sábado", "Sabado", "Domingo",
+    "Janeiro", "Fevereiro", "Março", "Marco", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    "Hoje", "Amanhã", "Amanha", "Ontem",
+    "Cadência", "Cadencia", "Contato", "Contatos", "Memória", "Memoria", "Memórias", "Memorias",
+    "Interação", "Interacao", "Interações", "Interacoes",
+    "Follow", "FollowUp", "Lembrete", "Lembretes",
+    "BRT",
+    # Verbos em 1ª pessoa do singular — começo de frase típico do Alfred
+    "Cadastrei", "Criei", "Adicionei", "Registrei", "Salvei", "Gravei", "Anotei",
+    "Marquei", "Agendei", "Programei", "Atualizei", "Defini", "Configurei",
+    "Falei", "Encontrei", "Liguei", "Conversei", "Vi", "Tive", "Arquivei", "Mesclei",
+    "Preciso", "Quero", "Quer", "Vou", "Devo", "Posso", "Consigo", "Acho", "Sei", "Tenho",
+    "Entendi", "Procurei", "Busquei", "Verifiquei", "Confirmei",
+    # Verbos 3ª pessoa comuns
+    "Feito", "Pronto", "Prontinho",
+    # Pronomes/conectores comuns em início de frase
+    "Ele", "Ela", "Eles", "Elas", "Isso", "Isto", "Aquilo", "Essa", "Esse", "Este", "Esta",
+    "Aqui", "Lá", "La", "Ali", "Agora", "Depois", "Antes", "Então", "Entao",
+    "Mas", "Porém", "Porem", "Contudo", "Portanto",
+}
+
+
+def _extract_claimed_tools(text: str) -> set[str]:
+    text_l = text.lower()
+    claimed: set[str] = set()
+    for tool, patterns in _CLAIM_PATTERNS.items():
+        if any(re.search(p, text_l) for p in patterns):
+            claimed.add(tool)
+    return claimed
+
+
+def _extract_names(text: str) -> set[str]:
+    """Extrai candidatos a nome próprio (Title Case) do texto, filtrando stopwords.
+    Ignora a primeira palavra capitalizada de cada sentença (início de frase)."""
+    names: set[str] = set()
+    # Split por pontuação de fim de sentença + newline
+    sentences = re.split(r"[.!?\n]+", text)
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        matches = _NAME_RE.findall(sent)
+        if not matches:
+            continue
+        # O primeiro match pode ser o início da frase → só aceita se NÃO for stopword.
+        # Stopwords no início são ignoradas; não-stopwords no início passam
+        # (pode ser um nome próprio iniciando a frase, ex: "Daniel foi registrado").
+        for m in matches:
+            if m in _NAME_STOPWORDS:
+                continue
+            if len(m) < 3:
+                continue
+            names.add(m)
+    return names
+
+
+def _name_matches(a: str, b: str) -> bool:
+    a_l, b_l = a.lower(), b.lower()
+    if a_l == b_l:
+        return True
+    # Match parcial: primeiro nome ou substring
+    a_tokens = set(a_l.split())
+    b_tokens = set(b_l.split())
+    return bool(a_tokens & b_tokens)
+
+
+async def _validate_response_truthfulness(
+    user_id: str,
+    final_text: str,
+    tool_calls_log: list[tuple[str, dict]],
+) -> list[str]:
+    """Cruza o texto final com o que realmente foi executado + fonte confiável (DB)."""
+    problems: list[str] = []
+    tools_called = {name for name, _ in tool_calls_log}
+
+    # ── Validador 1: afirmação de ação sem tool call correspondente ──
+    claimed = _extract_claimed_tools(final_text)
+    for tool in claimed:
+        if tool not in tools_called:
+            problems.append(
+                f"• Você afirmou ter executado `{tool}` mas NÃO chamou essa ferramenta "
+                f"neste turno. Chame AGORA ou retire a afirmação."
+            )
+
+    # ── Validador 2: nomes mencionados que não existem no DB ──
+    names = _extract_names(final_text)
+    if names:
+        created_names: list[str] = []
+        searched_names: list[str] = []
+        for tname, tinput in tool_calls_log:
+            if tname == "create_contact":
+                dn = (tinput.get("display_name") or "").strip()
+                if dn:
+                    created_names.append(dn)
+            elif tname == "list_contacts":
+                s = (tinput.get("search") or "").strip()
+                if s:
+                    searched_names.append(s)
+
+        try:
+            db = get_db()
+            existing = (
+                db.table("contacts")
+                .select("display_name")
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
+            existing_names = [c["display_name"] for c in (existing.data or [])]
+        except Exception:
+            log.exception("validator.db_lookup_failed")
+            existing_names = []
+
+        for name in names:
+            in_db = any(_name_matches(name, e) for e in existing_names)
+            was_created = any(_name_matches(name, c) for c in created_names)
+            was_searched = any(_name_matches(name, s) for s in searched_names)
+
+            if in_db or was_created:
+                continue
+            if was_searched:
+                # Claude buscou, não achou, não criou → está confirmando algo que não existe
+                problems.append(
+                    f"• Você mencionou '{name}' mas `list_contacts` mostrou que essa pessoa "
+                    f"NÃO existe e você não chamou `create_contact`. Não confirme o que não fez."
+                )
+                continue
+            problems.append(
+                f"• Você mencionou '{name}' na resposta, mas essa pessoa não existe no banco "
+                f"e você não chamou `list_contacts` nem `create_contact` neste turno. "
+                f"Nunca invente contatos — chame `list_contacts` para verificar primeiro."
+            )
+
+    return problems
+
+
 async def _alert_owner(telegram_id: int, message: str) -> None:
     """Send an urgent alert to the user via Telegram."""
     try:
@@ -237,7 +417,10 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
 
     # Tracks every tool name executed neste turno — usado pelo guardrail
     tools_called_this_turn: set[str] = set()
-    # Quantas vezes o guardrail reinjetou lembrete (evita loop infinito)
+    # Log completo (nome + input) — usado pelo validador de veracidade
+    tool_calls_log: list[tuple[str, dict]] = []
+    # Quantas vezes o guardrail reinjetou lembrete (evita loop infinito).
+    # Budget compartilhado entre guardrail de input e validador de output.
     guardrail_retries = 0
     MAX_GUARDRAIL_RETRIES = 2
     # Quando True, força tool_choice=any no próximo round para quebrar
@@ -328,16 +511,59 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                     tools_called=list(tools_called_this_turn),
                 )
                 error_msg = (
-                    "Ops, algo travou aqui e eu não consegui executar tudo o que você pediu. "
-                    "Pode repetir a mensagem? 🙏"
+                    "Ops, travou aqui e não consegui executar tudo o que você pediu. "
+                    "Pode confirmar o que você quer que eu faça? Vou refazer com cuidado. 🙏"
                 )
                 await _save_message(user_id, "assistant", error_msg)
                 return error_msg
 
-            # Final answer
+            # Final answer (candidato)
             final_text = "\n".join(b.text for b in text_blocks).strip()
             if not final_text:
                 final_text = "Feito."
+
+            # ───── Validador de veracidade — cruza texto com DB ─────
+            truthfulness_problems = await _validate_response_truthfulness(
+                user_id=user_id,
+                final_text=final_text,
+                tool_calls_log=tool_calls_log,
+            )
+            if truthfulness_problems and guardrail_retries < MAX_GUARDRAIL_RETRIES:
+                guardrail_retries += 1
+                log.warning(
+                    "validator.untruthful_response",
+                    problems=truthfulness_problems,
+                    tools_called=list(tools_called_this_turn),
+                    retry=guardrail_retries,
+                )
+                reminder_text = (
+                    "⚠️ STOP. Sua resposta contém afirmações que não correspondem ao que foi "
+                    "realmente executado neste turno, ou menciona pessoas que não estão no banco.\n\n"
+                    "Problemas detectados:\n\n"
+                    + "\n".join(truthfulness_problems)
+                    + "\n\nCorrija AGORA: ou execute as ferramentas que faltam, ou reescreva "
+                    "a resposta sem inventar fatos. NUNCA confirme algo que você não fez. "
+                    "Se não encontrou um contato, diga isso explicitamente e pergunte se deve criar."
+                )
+                messages.append({"role": "assistant", "content": response.content})  # type: ignore[typeddict-item]
+                messages.append({"role": "user", "content": reminder_text})
+                force_tool_use_next_round = True
+                continue
+
+            if truthfulness_problems:
+                # Validador esgotou retries — pede confirmação ao usuário em vez de mentir
+                log.error(
+                    "validator.exhausted",
+                    problems=truthfulness_problems,
+                    tools_called=list(tools_called_this_turn),
+                )
+                error_msg = (
+                    "Não consegui validar o que ia te responder — alguma informação não "
+                    "bateu com o que está salvo. Pode me confirmar exatamente o que você "
+                    "quer que eu faça (quem, quando, o quê)? Vou refazer do zero. 🙏"
+                )
+                await _save_message(user_id, "assistant", error_msg)
+                return error_msg
 
             # Save assistant message
             await _save_message(user_id, "assistant", final_text)
@@ -347,6 +573,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
         tool_results: list[ToolResultBlockParam] = []
         for tool_call in tool_calls:
             tools_called_this_turn.add(tool_call.name)
+            tool_calls_log.append((tool_call.name, dict(tool_call.input)))  # type: ignore[arg-type]
             try:
                 result = await dispatch_tool(
                     tool_name=tool_call.name,
