@@ -183,23 +183,30 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     # Quantas vezes o guardrail reinjetou lembrete (evita loop infinito)
     guardrail_retries = 0
     MAX_GUARDRAIL_RETRIES = 2
+    # Quando True, força tool_choice=any no próximo round para quebrar
+    # alucinações em que Claude insiste em emitir texto sem chamar ferramentas
+    force_tool_use_next_round = False
 
     # Agentic loop — keep going until we get a stop_turn with no tool calls
     for _turn in range(10):  # max 10 tool rounds
         try:
-            response = await client.messages.create(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                system=[
+            create_kwargs: dict = {
+                "model": MODEL,
+                "max_tokens": MAX_TOKENS,
+                "system": [
                     {
                         "type": "text",
                         "text": system_prompt,
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                tools=TOOL_SCHEMAS,  # type: ignore[arg-type]
-                messages=messages,
-            )
+                "tools": TOOL_SCHEMAS,
+                "messages": messages,
+            }
+            if force_tool_use_next_round:
+                create_kwargs["tool_choice"] = {"type": "any"}
+                force_tool_use_next_round = False
+            response = await client.messages.create(**create_kwargs)
         except RateLimitError:
             log.warning("anthropic.rate_limit")
             return "Estou sobrecarregado no momento, tente em alguns minutos. 🔄"
@@ -238,16 +245,37 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                     retry=guardrail_retries,
                 )
                 reminder_text = (
-                    "⚠️ STOP. Você estava prestes a responder, mas releu a mensagem "
-                    "original do usuário e percebeu que ainda faltam ferramentas a chamar:\n\n"
+                    "⚠️ STOP. IGNORE qualquer confirmação anterior no histórico — aquilo pode "
+                    "ser alucinação de turno passado. Verifique APENAS o que foi executado "
+                    "neste turno atual via ferramentas.\n\n"
+                    "Faltam ferramentas a chamar para cumprir a mensagem atual do usuário:\n\n"
                     + "\n".join(missing)
-                    + "\n\nExecute essas ferramentas AGORA antes de responder. "
+                    + "\n\nExecute essas ferramentas AGORA. Se precisar do contact_id, chame "
+                    "list_contacts primeiro. Se o contato não existir, chame create_contact. "
                     "NÃO emita texto final até que todas as ações tenham sido realmente realizadas."
                 )
                 # Continua o diálogo: injeta a resposta de Claude + correção sintética como user
                 messages.append({"role": "assistant", "content": response.content})  # type: ignore[typeddict-item]
                 messages.append({"role": "user", "content": reminder_text})
+                # Força Claude a chamar uma ferramenta no próximo round —
+                # não pode mais escapar emitindo só texto
+                force_tool_use_next_round = True
                 continue
+
+            # Guardrail esgotou retries mas ainda detecta ferramenta faltando →
+            # NUNCA retornar texto alucinado. Responde erro explícito.
+            if missing:
+                log.error(
+                    "guardrail.exhausted",
+                    missing=missing,
+                    tools_called=list(tools_called_this_turn),
+                )
+                error_msg = (
+                    "Ops, algo travou aqui e eu não consegui executar tudo o que você pediu. "
+                    "Pode repetir a mensagem? 🙏"
+                )
+                await _save_message(user_id, "assistant", error_msg)
+                return error_msg
 
             # Final answer
             final_text = "\n".join(b.text for b in text_blocks).strip()
