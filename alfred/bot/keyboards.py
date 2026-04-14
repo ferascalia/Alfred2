@@ -23,6 +23,13 @@ def confirm_keyboard(action: str, item_id: str) -> InlineKeyboardMarkup:
     ])
 
 
+def import_confirm_keyboard(file_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirmar importação", callback_data=f"import:confirm:{file_id}"),
+        InlineKeyboardButton("❌ Cancelar", callback_data="import:cancel"),
+    ]])
+
+
 def contact_action_keyboard(contact_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [

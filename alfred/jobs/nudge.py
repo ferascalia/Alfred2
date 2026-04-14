@@ -55,18 +55,21 @@ async def process_nudge(contact_id: str) -> dict[str, Any]:
         .execute()
     )
 
-    # Calculate days since last contact
-    last_dt = None
-    last_summary = "sem histórico"
+    # Calculate days since last contact — use contacts.last_interaction_at as source of truth.
+    # The interactions table may be outdated when the user marks contacts via "Já falei"
+    # (which updates contacts.last_interaction_at but does not insert an interactions record).
+    days_since: int | str = "?"
+    last_contact_raw = contact.get("last_interaction_at")
+    if last_contact_raw:
+        with contextlib.suppress(Exception):
+            last_contact_dt = datetime.fromisoformat(last_contact_raw.replace("Z", "+00:00"))
+            days_since = (datetime.now(UTC) - last_contact_dt).days
+
+    # Last interaction summary — from interactions table (richer context when available)
+    last_summary = "sem histórico registrado"
     if last_interaction.data:
         li = last_interaction.data[0]
         last_summary = f"via {li['channel']}: {li['summary']}"
-        with contextlib.suppress(Exception):
-            last_dt = datetime.fromisoformat(li["happened_at"].replace("Z", "+00:00"))
-
-    days_since = (
-        (datetime.now(UTC) - last_dt).days if last_dt else "?"
-    )
 
     memory_lines = "\n".join(
         f"- [{m['kind']}] {m['content']}" for m in memories.data

@@ -45,4 +45,8 @@ async def log_interaction(
     }).eq("id", contact_id).eq("user_id", user_id).execute()
 
     log.info("interaction.logged", user_id=user_id, contact_id=contact_id, channel=channel)
-    return f"Interação registrada: {summary[:80]}..."
+    return (
+        f"Interação registrada: {summary[:80]}...\n"
+        "⚠️ Se o usuário mencionou um follow-up, prazo ou próximo encontro neste turno, "
+        "chame set_follow_up AGORA antes de responder."
+    )

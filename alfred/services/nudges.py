@@ -37,12 +37,34 @@ async def handle_nudge_action(nudge_id: str, action: str) -> str:
         return "Interação registrada."
 
     elif action == "snooze":
-        # Postpone next_nudge_at by 7 days
         db.table("nudges").update({"status": "snoozed"}).eq("id", nudge_id).execute()
-        new_nudge = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+
+        # Se o contato tem cadência por dia da semana, avança para a próxima ocorrência
+        contact_result = (
+            db.table("contacts")
+            .select("nudge_weekday")
+            .eq("id", nudge["contact_id"])
+            .single()
+            .execute()
+        )
+        nudge_weekday = contact_result.data.get("nudge_weekday") if contact_result.data else None
+
+        if nudge_weekday is not None:
+            # Python weekday(): 0=Seg…6=Dom — mesma convenção que nudge_weekday
+            today = datetime.now(UTC).date()
+            days_until = (nudge_weekday - today.weekday() + 7) % 7
+            if days_until == 0:
+                days_until = 7
+            next_date = today + timedelta(days=days_until)
+            new_nudge = datetime(next_date.year, next_date.month, next_date.day, tzinfo=UTC).isoformat()
+            msg = f"Adiado para a próxima ocorrência agendada."
+        else:
+            new_nudge = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+            msg = "Adiado por 7 dias."
+
         db.table("contacts").update({"next_nudge_at": new_nudge}).eq("id", nudge["contact_id"]).execute()
         log.info("nudge.snoozed", nudge_id=nudge_id, contact_id=nudge["contact_id"])
-        return "Adiado por 7 dias."
+        return msg
 
     elif action == "mute":
         db.table("nudges").update({"status": "muted"}).eq("id", nudge_id).execute()

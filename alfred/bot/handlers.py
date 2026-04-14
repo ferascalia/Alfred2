@@ -122,6 +122,73 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /import — send CSV template with instructions."""
+    if not update.effective_user or not update.message:
+        return
+
+    import io
+
+    from alfred.services.import_csv import build_template_csv
+
+    csv_bytes = build_template_csv()
+
+    await update.message.reply_document(
+        document=io.BytesIO(csv_bytes),
+        filename="template_alfred.csv",
+        caption=(
+            "📥 *Como importar contatos em massa:*\n\n"
+            "1\\. Abra o arquivo `template_alfred.csv` no Excel ou Google Sheets\n"
+            "2\\. Preencha uma linha por contato\n"
+            "3\\. Salve como CSV e envie aqui\n\n"
+            "*Colunas disponíveis:*\n"
+            "• `display_name` — obrigatório\n"
+            "• `company`, `role`, `how_we_met` — texto livre\n"
+            "• `cadence_days` — inteiro de 1 a 365 \\(padrão: 15\\)\n"
+            "• `relationship_type` — friend \\| professional \\| family \\| other\n"
+            "• `tags` — separados por `|` \\(ex: `cliente|vip`\\)\n\n"
+            "Máximo de 100 contatos por importação\\."
+        ),
+        parse_mode="MarkdownV2",
+    )
+
+
+async def import_document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle CSV file upload — validate and show preview with confirm/cancel buttons."""
+    if not update.effective_user or not update.message or not update.message.document:
+        return
+
+    from alfred.bot.keyboards import import_confirm_keyboard
+    from alfred.services.import_csv import build_preview, download_csv, parse_and_validate
+
+    tg_user = update.effective_user
+    doc = update.message.document
+    chat_id = update.effective_chat.id  # type: ignore[union-attr]
+
+    log.info("import.csv_received", telegram_id=tg_user.id, file_name=doc.file_name)
+
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    try:
+        csv_bytes = await download_csv(doc.file_id)
+    except Exception:
+        log.exception("import.download_failed")
+        await update.message.reply_text("Não consegui baixar o arquivo. Tente novamente.")
+        return
+
+    rows, errors = parse_and_validate(csv_bytes)
+
+    if errors:
+        error_text = "❌ *Erros encontrados no CSV:*\n\n" + "\n".join(f"• {e}" for e in errors)
+        error_text += "\n\nCorrija o arquivo e envie novamente."
+        await update.message.reply_text(error_text, parse_mode="Markdown")
+        return
+
+    preview = build_preview(rows)
+    keyboard = import_confirm_keyboard(doc.file_id)
+    await update.message.reply_text(preview, parse_mode="Markdown", reply_markup=keyboard)
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.data:
@@ -129,7 +196,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await query.answer()
 
-    parts = query.data.split(":")
+    data = query.data
+
+    if data.startswith("import:"):
+        await _handle_import_callback(query, data)
+        return
+
+    parts = data.split(":", 2)
     if len(parts) < 3:
         return
 
@@ -155,8 +228,69 @@ async def _handle_nudge_callback(query: object, verb: str, nudge_id: str) -> Non
     elif verb == "done":
         await q.edit_message_text("✅ Interação registrada. Próximo lembrete recalculado.")
     elif verb == "snooze":
-        await q.edit_message_text("⏰ Adiado por 7 dias.")
+        await q.edit_message_text(f"⏰ {result}")
     elif verb == "mute":
         await q.edit_message_text("🔇 Contato silenciado. Não enviarei mais lembretes.")
     else:
         await q.edit_message_text("Ação não reconhecida.")
+
+
+async def _handle_import_callback(query: object, data: str) -> None:
+    """Handle import:confirm:{file_id} and import:cancel callbacks."""
+    from telegram import CallbackQuery
+
+    from alfred.db.client import get_db
+    from alfred.services.import_csv import bulk_import, download_csv, parse_and_validate
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+
+    if data == "import:cancel":
+        await q.edit_message_text("❌ Importação cancelada.")
+        return
+
+    # data = "import:confirm:{file_id}"
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        await q.edit_message_text("Ação inválida.")
+        return
+
+    file_id = parts[2]
+
+    if not q.from_user:
+        return
+
+    db = get_db()
+    user_result = (
+        db.table("users").select("id").eq("telegram_id", q.from_user.id).single().execute()
+    )
+    if not user_result.data:
+        await q.edit_message_text("Usuário não encontrado. Use /start primeiro.")
+        return
+
+    user_id = user_result.data["id"]
+
+    await q.edit_message_text("⏳ Importando contatos...")
+
+    try:
+        csv_bytes = await download_csv(file_id)
+    except Exception:
+        log.exception("import.confirm_download_failed")
+        await q.edit_message_text("Não consegui baixar o arquivo. Envie o CSV novamente com /import.")
+        return
+
+    rows, errors = parse_and_validate(csv_bytes)
+    if errors:
+        await q.edit_message_text("❌ O arquivo parece ter sido modificado. Envie novamente.")
+        return
+
+    result = await bulk_import(user_id=user_id, rows=rows)
+    created = result["created"]
+    skipped: list[str] = result["skipped"]
+
+    s_c = "s" if created != 1 else ""
+    msg = f"✅ *{created} contato{s_c} criado{s_c}.*"
+    if skipped:
+        s_s = "s" if len(skipped) != 1 else ""
+        msg += f"\n\n⚠️ {len(skipped)} duplicata{s_s} ignorada{s_s}: {', '.join(skipped)}."
+
+    await q.edit_message_text(msg, parse_mode="Markdown")

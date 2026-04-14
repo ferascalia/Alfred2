@@ -44,7 +44,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "create_contact",
-        "description": "Cria um novo contato. Use quando o usuário mencionar uma pessoa nova.",
+        "description": (
+            "Cria um novo contato. Use quando o usuário mencionar uma pessoa nova. "
+            "CRÍTICO: criar contato NUNCA é o passo final quando o usuário também mencionou "
+            "uma interação ('falei com ele hoje'), data ('quarta'), follow-up ('me lembra'), "
+            "ou cadência ('toda terça'). Depois de criar, você DEVE chamar log_interaction e/ou "
+            "set_follow_up e/ou set_cadence no mesmo turno antes de responder. Não confie na memória — "
+            "releia a mensagem do usuário e execute TODAS as ações pedidas."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -109,14 +116,29 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "set_cadence",
-        "description": "Define a cadência de contato desejada para um contato (de quantos em quantos dias).",
+        "description": (
+            "Define a cadência de contato desejada. "
+            "Use 'weekday' quando o usuário quiser ser lembrado num dia fixo da semana "
+            "(ex: 'toda terça', 'toda segunda'). "
+            "Quando weekday é informado, days é opcional (padrão 7). "
+            "Omitir weekday volta para cadência por dias e limpa qualquer dia fixo anterior."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "contact_id": {"type": "string"},
-                "days": {"type": "integer", "description": "Intervalo em dias entre contatos"},
+                "days": {
+                    "type": "integer",
+                    "description": "Intervalo em dias entre contatos (ignorado se weekday for informado)",
+                    "default": 7,
+                },
+                "weekday": {
+                    "type": "string",
+                    "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+                    "description": "Dia fixo da semana para o lembrete. Omitir para cadência por dias.",
+                },
             },
-            "required": ["contact_id", "days"],
+            "required": ["contact_id"],
         },
     },
     {
@@ -157,7 +179,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "set_follow_up",
-        "description": "Marca um follow-up para um contato em uma data específica. Use quando o usuário disser 'me lembra de falar com X na sexta', 'follow-up em 10 dias', 'preciso falar com ele em 2 dias', etc. Sempre chame APÓS log_interaction quando ambos forem necessários no mesmo turno.",
+        "description": (
+            "Marca um follow-up para um contato em uma data específica. "
+            "Use SEMPRE que o usuário mencionar um dia futuro ou prazo: 'me lembra na sexta', "
+            "'marca para quarta', 'follow-up em 10 dias', 'preciso falar com ele em 2 dias'. "
+            "Calcule a data absoluta a partir de hoje (a data atual está no system prompt) "
+            "e passe no formato YYYY-MM-DD. "
+            "Se um create_contact foi chamado antes neste turno, use o id retornado. "
+            "Sempre chame APÓS log_interaction quando ambos forem necessários no mesmo turno. "
+            "NUNCA diga ao usuário que marcou um follow-up sem ter chamado esta ferramenta."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -227,7 +258,18 @@ async def dispatch_tool(
 
     if tool_name == "set_cadence":
         from alfred.services.contacts import set_cadence
-        return await set_cadence(user_id=user_id, **tool_input)
+        _weekday_map = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6,
+        }
+        weekday_str = tool_input.get("weekday")
+        weekday_int = _weekday_map[weekday_str] if weekday_str else None
+        return await set_cadence(
+            user_id=user_id,
+            contact_id=tool_input["contact_id"],
+            days=tool_input.get("days", 7),
+            weekday=weekday_int,
+        )
 
     if tool_name == "archive_contact":
         from alfred.services.contacts import archive_contact

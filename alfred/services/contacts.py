@@ -69,10 +69,17 @@ async def get_contact_digest(user_id: str, contact_id: str) -> str:
         .execute()
     )
 
+    _weekday_names = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+    nudge_weekday = c.get("nudge_weekday")
+    cadence_str = (
+        f"toda {_weekday_names[nudge_weekday]}"
+        if nudge_weekday is not None
+        else f"a cada {c.get('cadence_days', 30)} dias"
+    )
     lines = [
         f"**{c['display_name']}**",
         f"Empresa: {c.get('company') or '—'} | Cargo: {c.get('role') or '—'}",
-        f"Cadência: a cada {c.get('cadence_days', 30)} dias",
+        f"Cadência: {cadence_str}",
         f"Último contato: {c.get('last_interaction_at', 'nunca')[:10] if c.get('last_interaction_at') else 'nunca'}",
         "",
         "**Memórias:**",
@@ -120,7 +127,15 @@ async def create_contact(user_id: str, **kwargs: Any) -> str:
     result = db.table("contacts").insert(data).execute()
     c = result.data[0]
     log.info("contact.created", user_id=user_id, contact_id=c["id"])
-    return f"Contato **{c['display_name']}** criado com sucesso (id: {c['id']})."
+    return (
+        f"Contato **{c['display_name']}** criado com sucesso (id: {c['id']}).\n"
+        "⚠️ ANTES de responder ao usuário, verifique se ele pediu mais alguma coisa "
+        "neste mesmo turno:\n"
+        "• Mencionou uma interação recente ('falei', 'encontrei', 'liguei')? → chame log_interaction agora.\n"
+        "• Mencionou um dia futuro ou follow-up ('me lembra', 'marca para', 'na quarta')? → chame set_follow_up agora.\n"
+        "• Pediu cadência recorrente ('toda terça', 'a cada 10 dias')? → chame set_cadence agora.\n"
+        "Não feche o turno sem executar essas ferramentas."
+    )
 
 
 async def create_contact_confirmed(user_id: str, **kwargs: Any) -> str:
@@ -130,7 +145,15 @@ async def create_contact_confirmed(user_id: str, **kwargs: Any) -> str:
     result = db.table("contacts").insert(data).execute()
     c = result.data[0]
     log.info("contact.created", user_id=user_id, contact_id=c["id"])
-    return f"Contato **{c['display_name']}** criado com sucesso (id: {c['id']})."
+    return (
+        f"Contato **{c['display_name']}** criado com sucesso (id: {c['id']}).\n"
+        "⚠️ ANTES de responder ao usuário, verifique se ele pediu mais alguma coisa "
+        "neste mesmo turno:\n"
+        "• Mencionou uma interação recente? → chame log_interaction agora.\n"
+        "• Mencionou um dia futuro ou follow-up? → chame set_follow_up agora.\n"
+        "• Pediu cadência recorrente? → chame set_cadence agora.\n"
+        "Não feche o turno sem executar essas ferramentas."
+    )
 
 
 async def merge_contacts(user_id: str, primary_id: str, duplicate_id: str) -> str:
@@ -168,9 +191,21 @@ async def update_contact(user_id: str, contact_id: str, fields: dict[str, Any]) 
     return f"Contato {contact_id} atualizado: {json.dumps(fields, ensure_ascii=False)}."
 
 
-async def set_cadence(user_id: str, contact_id: str, days: int) -> str:
+_WEEKDAY_NAMES = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+
+
+async def set_cadence(user_id: str, contact_id: str, days: int = 7, weekday: int | None = None) -> str:
+    """Define cadência por dias ou por dia fixo da semana (0=Seg…6=Dom).
+    Passar weekday=None limpa qualquer cadência semanal existente.
+    """
     db = get_db()
-    db.table("contacts").update({"cadence_days": days}).eq("id", contact_id).eq("user_id", user_id).execute()
+    db.table("contacts").update({
+        "cadence_days": days,
+        "nudge_weekday": weekday,  # None → NULL no banco, limpa cadência semanal
+    }).eq("id", contact_id).eq("user_id", user_id).execute()
+
+    if weekday is not None:
+        return f"Cadência definida para toda {_WEEKDAY_NAMES[weekday]}."
     return f"Cadência definida para {days} dias."
 
 
