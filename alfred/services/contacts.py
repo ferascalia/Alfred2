@@ -24,13 +24,29 @@ async def list_contacts(
     result = q.order("display_name").execute()
 
     if not result.data:
-        return "Nenhum contato encontrado."
+        hint = ""
+        if search:
+            hint = (
+                f"\n⚠️ Nenhum contato com nome '{search}' encontrado. "
+                "Se o usuário mencionou essa pessoa, chame create_contact AGORA "
+                "(e depois log_interaction/set_follow_up se aplicável) antes de responder."
+            )
+        return "Nenhum contato encontrado." + hint
 
     lines = []
     for c in result.data:
         last = c.get("last_interaction_at")
         last_str = f" | último contato: {last[:10]}" if last else ""
         lines.append(f"- **{c['display_name']}** (id: {c['id']}){last_str}")
+
+    # Hint para contatos existentes: lembrar de executar ações encadeadas
+    if search and result.data:
+        lines.append(
+            "\n⚠️ Contato(s) encontrado(s). ANTES de responder, releia a mensagem original:\n"
+            "• Mencionou interação recente? → log_interaction agora\n"
+            "• Mencionou follow-up / data futura? → set_follow_up agora\n"
+            "• Pediu cadência recorrente? → set_cadence agora"
+        )
     return "\n".join(lines)
 
 

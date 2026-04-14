@@ -44,7 +44,14 @@ async def add_memory(
         "embedding": embedding,
     }).execute()
     log.info("memory.added", user_id=user_id, contact_id=contact_id, kind=kind)
-    return f"Memória registrada: {content}"
+    return (
+        f"Memória registrada: {content}\n"
+        "⚠️ ANTES de responder ao usuário, releia a mensagem original e verifique:\n"
+        "• Ele disse que falou/encontrou/conversou com esta pessoa? → chame log_interaction agora.\n"
+        "• Ele mencionou um dia futuro, prazo ou 'me lembra'? → chame set_follow_up agora.\n"
+        "• Ele pediu cadência recorrente ('toda terça')? → chame set_cadence agora.\n"
+        "Não feche o turno com 'registrado ✅' se alguma dessas ações está pendente."
+    )
 
 
 async def search_memories(
