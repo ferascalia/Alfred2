@@ -1,9 +1,11 @@
 """Agent loop with tool use."""
 import re
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from anthropic.types import MessageParam, TextBlock, ToolResultBlockParam, ToolUseBlock
+from dateparser.search import search_dates
 
 from alfred.agent.client import MAX_TOKENS, MODEL, get_anthropic
 from alfred.agent.prompts import SYSTEM_PROMPT
@@ -23,16 +25,19 @@ _INTERACTION_PATTERNS = [
     r"\bencontr(ei|amos|ou)\b", r"\bligu(ei|ou)\b", r"\balmo(c|ç)(ei|amos)\b",
     r"\bjant(ei|amos)\b", r"\bvi\s+(o|a|ele|ela)\b", r"\breun(i|imos)\b",
     r"\bmandou\b", r"\bmandei\b", r"\bme\s+ligou\b", r"\bme\s+chamou\b",
-]
-
-# Patterns que indicam follow-up, prazo ou data futura
-_FOLLOWUP_PATTERNS = [
-    r"\bme\s+lembr(a|e|ar)\b", r"\bmarc(a|ar|e)\b", r"\bagend(a|ar|e)\b",
-    r"\breagend(a|ar|e)\b", r"\bfollow[\s-]?up\b", r"\bamanh(ã|a)\b",
-    r"\bdepois\s+de\s+amanh(ã|a)\b", r"\bsemana\s+que\s+vem\b",
-    r"\bpr(ó|o)xim(a|o)\s+(semana|mês|mes)\b",
-    r"\b(segunda|ter(ç|c)a|quarta|quinta|sexta|s(á|a)bado|domingo)(-feira)?\b",
-    r"\bdaqui\s+a\s+\d+\s+dias?\b", r"\bem\s+\d+\s+dias?\b",
+    # Reunião no passado
+    r"\btive\s+(uma\s+)?reuni(ã|a)o\b", r"\bteve\s+(uma\s+)?reuni(ã|a)o\b",
+    r"\bacabei\s+de\s+(falar|conversar|sair)\b",
+    r"\b(tava|estava)\s+(conversando|falando)\b",
+    # Mensagens trocadas
+    r"\bme\s+respondeu\b",
+    r"\bme\s+passou\s+(mensagem|recado|(á|a)udio)\b",
+    r"\bmandou\s+(mensagem|(á|a)udio|recado)\b",
+    r"\bmandei\s+(mensagem|(á|a)udio|recado)\b",
+    # Encontros presenciais
+    r"\btomei\s+(um\s+)?(caf(é|e)|drink)\s+com\b",
+    r"\bcaf(é|e)\s+com\b",
+    r"\bpassei\s+(no|na|pelo|pela)\b",
 ]
 
 # Patterns para cadência recorrente
@@ -40,7 +45,50 @@ _CADENCE_PATTERNS = [
     r"\btoda\s+(segunda|ter(ç|c)a|quarta|quinta|sexta|s(á|a)bado|domingo)",
     r"\ba\s+cada\s+\d+\s+dias?\b", r"\bde\s+\d+\s+em\s+\d+\s+dias?\b",
     r"\bsemanalmente\b", r"\bmensalmente\b",
+    r"\btoda\s+(semana|quinzena|m(ê|e)s)\b",
+    r"\bquinzenalmente\b",
+    r"\b(uma|duas|tr(ê|e)s)\s+vezes\s+por\s+(semana|m(ê|e)s)\b",
 ]
+
+
+# Fallback patterns para intenção de follow-up que o dateparser NÃO cobre em pt-BR.
+# Quando algum desses dispara e o dateparser não extraiu nada, forçamos set_follow_up
+# mas sem data pré-calculada — o Claude precisa resolver.
+_FOLLOWUP_FALLBACK_PATTERNS = [
+    r"\bme\s+lembr(a|e|ar)\b",
+    r"\bfollow[\s-]?up\b",
+    r"\bdia\s+\d{1,2}\b",                        # "dia 20"
+    r"\bsemana\s+que\s+vem\b",
+    r"\bm(ê|e)s\s+que\s+vem\b",
+    r"\bano\s+que\s+vem\b",
+    r"\bdaqui\s+a\s+(uma|duas|tr(ê|e)s|quatro|cinco|seis)\s+(dias?|semanas?|meses|m(ê|e)s)\b",
+    r"\bem\s+(uma|duas|tr(ê|e)s|quatro|cinco|seis)\s+(dias?|semanas?|meses|m(ê|e)s)\b",
+    r"\bpr(ó|o)xim(a|o)\s+(semana|m(ê|e)s|ano)\b",
+    r"\bdepois\s+de\s+amanh(ã|a)\b",
+]
+
+_BRT = timezone(timedelta(hours=-3))
+
+
+def _detect_future_dates(user_message: str) -> list[tuple[str, datetime]]:
+    """Usa dateparser para extrair datas futuras da mensagem. 100% determinístico."""
+    now = datetime.now(_BRT)
+    try:
+        hits = search_dates(
+            user_message,
+            languages=["pt"],
+            settings={
+                "PREFER_DATES_FROM": "future",
+                "RELATIVE_BASE": now.replace(tzinfo=None),
+                "RETURN_AS_TIMEZONE_AWARE": False,
+            },
+        ) or []
+    except Exception:
+        log.exception("dateparser.search_dates_failed", message=user_message)
+        return []
+
+    today = now.date()
+    return [(snippet, dt) for (snippet, dt) in hits if dt.date() > today]
 
 
 def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[str]:
@@ -49,8 +97,10 @@ def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[s
     missing: list[str] = []
 
     has_interaction = any(re.search(p, msg) for p in _INTERACTION_PATTERNS)
-    has_followup = any(re.search(p, msg) for p in _FOLLOWUP_PATTERNS)
     has_cadence = any(re.search(p, msg) for p in _CADENCE_PATTERNS)
+    future_dates = _detect_future_dates(user_message)
+    has_followup_fallback = any(re.search(p, msg) for p in _FOLLOWUP_FALLBACK_PATTERNS)
+    has_followup = bool(future_dates) or has_followup_fallback
 
     if has_interaction and "log_interaction" not in tools_called:
         missing.append(
@@ -58,13 +108,20 @@ def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[s
             "mas não registrou a interação."
         )
 
-    # Follow-up e cadência são excludentes: basta uma das duas ferramentas
-    needs_scheduling = has_followup or has_cadence
+    # Cadência tem prioridade sobre follow-up pontual
     scheduled = "set_follow_up" in tools_called or "set_cadence" in tools_called
-    if needs_scheduling and not scheduled:
-        if has_cadence:
+    if has_cadence and not scheduled:
+        missing.append(
+            "• `set_cadence` — você pediu cadência recorrente mas não configurou."
+        )
+    elif has_followup and not scheduled:
+        if future_dates:
+            snippet, dt = future_dates[0]
+            date_iso = dt.date().isoformat()
             missing.append(
-                "• `set_cadence` — você pediu cadência recorrente mas não configurou."
+                f"• `set_follow_up` — você mencionou '{snippet.strip()}' "
+                f"(interpretado como {date_iso}) mas não agendou. "
+                f"Chame set_follow_up com date='{date_iso}'."
             )
         else:
             missing.append(
