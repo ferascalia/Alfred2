@@ -257,6 +257,47 @@ async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | No
     return f"Follow-up marcado para **{name}** no dia {parsed.strftime('%d/%m/%Y')}{note_str}."
 
 
+async def list_upcoming_follow_ups(user_id: str, until_date: str) -> str:
+    """List contacts with next_nudge_at scheduled up to (and including) until_date.
+
+    Reads the real source of truth (contacts.next_nudge_at) so the agent never
+    has to guess what's scheduled.
+    """
+    from datetime import date as date_type
+
+    try:
+        parsed = date_type.fromisoformat(until_date)
+    except ValueError:
+        return f"Data inválida: '{until_date}'. Use o formato YYYY-MM-DD (ex: '2026-04-20')."
+
+    # Inclusive end-of-day in UTC
+    upper_bound = f"{parsed.isoformat()}T23:59:59+00:00"
+
+    db = get_db()
+    result = (
+        db.table("contacts")
+        .select("id, display_name, next_nudge_at")
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .not_.is_("next_nudge_at", "null")
+        .lte("next_nudge_at", upper_bound)
+        .order("next_nudge_at")
+        .execute()
+    )
+
+    if not result.data:
+        return (
+            f"Nenhum follow-up agendado até {parsed.strftime('%d/%m/%Y')}. "
+            "Não há nada para listar — NÃO invente compromissos."
+        )
+
+    lines = [f"**Follow-ups agendados até {parsed.strftime('%d/%m/%Y')}:**"]
+    for c in result.data:
+        when = c["next_nudge_at"][:10]
+        lines.append(f"- **{c['display_name']}** (id: {c['id']}) → {when}")
+    return "\n".join(lines)
+
+
 async def archive_contact(user_id: str, contact_id: str) -> str:
     db = get_db()
     db.table("contacts").update({"status": "archived"}).eq("id", contact_id).eq("user_id", user_id).execute()

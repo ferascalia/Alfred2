@@ -163,6 +163,13 @@ _CLAIM_PATTERNS: dict[str, list[str]] = {
         r"\b(adicionei|salvei|registrei|anotei)\s+(a\s+|uma\s+|essa\s+|esta\s+)?mem(ó|o)ria\b",
         r"\bmem(ó|o)ria\s+(adicionada|salva|registrada|gravada)\b",
     ],
+    "list_follow_ups": [
+        r"\bseus\s+follow[\s-]?ups?\s+(marcad[oa]s?|agendad[oa]s?|s(ã|a)o)\b",
+        r"\bfollow[\s-]?ups?\s+(marcad[oa]s?|agendad[oa]s?)\s+para\b",
+        r"\baqui\s+(est(ã|a)o|v(ã|a)o)\s+(os\s+)?seus\s+follow[\s-]?ups?\b",
+        r"\bseus\s+(lembretes|compromissos)\s+(marcad[oa]s?|agendad[oa]s?|s(ã|a)o)\b",
+        r"\b(voc(ê|e))\s+tem\s+(os\s+seguintes\s+)?follow[\s-]?ups?\b",
+    ],
 }
 
 _NAME_RE = re.compile(

@@ -53,6 +53,55 @@ async def test_dispatch_add_memory() -> None:
     assert "Memória registrada" in result
 
 
+@pytest.mark.asyncio
+async def test_dispatch_list_follow_ups_calls_service() -> None:
+    from alfred.agent.tools import dispatch_tool
+
+    expected = "**Follow-ups agendados até 20/04/2026:**\n- **Daniel** (id: abc) → 2026-04-15"
+    with patch(
+        "alfred.services.contacts.list_upcoming_follow_ups",
+        AsyncMock(return_value=expected),
+    ):
+        result = await dispatch_tool(
+            "list_follow_ups",
+            {"until_date": "2026-04-20"},
+            user_id="test-user-id",
+        )
+    assert "Daniel" in result
+    assert "Follow-ups agendados" in result
+
+
+@pytest.mark.asyncio
+async def test_list_upcoming_follow_ups_empty_does_not_invent() -> None:
+    from alfred.services import contacts as contacts_service
+
+    fake_db = MagicMock()
+    query = MagicMock()
+    fake_db.table.return_value = query
+    query.select.return_value = query
+    query.eq.return_value = query
+    query.not_.is_.return_value = query
+    query.lte.return_value = query
+    query.order.return_value = query
+    query.execute.return_value = MagicMock(data=[])
+
+    with patch("alfred.services.contacts.get_db", return_value=fake_db):
+        result = await contacts_service.list_upcoming_follow_ups(
+            user_id="test-user",
+            until_date="2026-04-20",
+        )
+    assert "Nenhum follow-up" in result
+    assert "NÃO invente" in result
+
+
+@pytest.mark.asyncio
+async def test_list_upcoming_follow_ups_invalid_date() -> None:
+    from alfred.services.contacts import list_upcoming_follow_ups
+
+    result = await list_upcoming_follow_ups(user_id="test-user", until_date="amanhã")
+    assert "Data inválida" in result
+
+
 def test_tool_schemas_have_required_fields() -> None:
     from alfred.agent.tools import TOOL_SCHEMAS
 

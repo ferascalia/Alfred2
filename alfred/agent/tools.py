@@ -200,6 +200,30 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_follow_ups",
+        "description": (
+            "Lista os follow-ups agendados do usuário até uma data limite. "
+            "Use SEMPRE que o usuário perguntar quais follow-ups, lembretes, "
+            "compromissos ou reminders ele tem marcados (ex: 'quais meus follow-ups "
+            "dessa semana?', 'o que tenho pra amanhã?', 'que lembretes eu marquei?'). "
+            "NUNCA responda essa pergunta de memória nem a partir do histórico de chat — "
+            "a única fonte de verdade é esta ferramenta. "
+            "Calcule until_date a partir da data atual (está no system prompt): "
+            "'essa semana' = domingo da semana atual, 'amanhã' = amanhã, "
+            "'próxima semana' = domingo da semana seguinte, sem referência temporal = hoje + 7 dias."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "until_date": {
+                    "type": "string",
+                    "description": "Data limite inclusiva no formato YYYY-MM-DD (ex: '2026-04-20')",
+                },
+            },
+            "required": ["until_date"],
+        },
+    },
+    {
         "name": "create_contact_confirmed",
         "description": "Cria um contato mesmo que já exista alguém com nome similar. Use apenas quando o usuário confirmar que são pessoas diferentes.",
         "input_schema": {
@@ -282,6 +306,10 @@ async def dispatch_tool(
     if tool_name == "set_follow_up":
         from alfred.services.contacts import set_follow_up
         return await set_follow_up(user_id=user_id, **tool_input)
+
+    if tool_name == "list_follow_ups":
+        from alfred.services.contacts import list_upcoming_follow_ups
+        return await list_upcoming_follow_ups(user_id=user_id, **tool_input)
 
     if tool_name == "merge_contacts":
         from alfred.services.contacts import merge_contacts
