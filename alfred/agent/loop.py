@@ -69,6 +69,34 @@ _FOLLOWUP_FALLBACK_PATTERNS = [
 
 _BRT = timezone(timedelta(hours=-3))
 
+# ───────────────────────────────────────────────────────────────
+# Date-confirmation prompt detector
+# Claude é instruído no system prompt a iniciar qualquer proposta de data
+# com a palavra literal "Confirmando:" seguida de pelo menos uma data numérica.
+# Quando o turno termina assim, pulamos ambos guardrails (pending-actions e
+# veracidade) porque a pausa é legítima — não é alucinação.
+# ───────────────────────────────────────────────────────────────
+_DATE_CONFIRM_PREFIX = re.compile(r"^\s*confirmando\s*:", re.IGNORECASE)
+_DATE_NUMERIC = re.compile(
+    r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b"
+)
+
+
+def _is_date_confirmation_prompt(response_text: str) -> bool:
+    """True quando Claude está propondo uma data para confirmação do usuário.
+
+    Requer DOIS sinais determinísticos simultâneos:
+    - Prefixo literal "Confirmando:" no início da mensagem
+    - Pelo menos uma data numérica (DD/MM, DD/MM/AAAA ou YYYY-MM-DD) no corpo
+    """
+    if not response_text:
+        return False
+    if not _DATE_CONFIRM_PREFIX.match(response_text):
+        return False
+    if not _DATE_NUMERIC.search(response_text):
+        return False
+    return True
+
 
 def _detect_future_dates(user_message: str) -> list[tuple[str, datetime]]:
     """Usa dateparser para extrair datas futuras da mensagem. 100% determinístico."""
@@ -481,6 +509,21 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
         text_blocks = [b for b in response.content if isinstance(b, TextBlock)]
 
         if response.stop_reason == "end_turn" or not tool_calls:
+            # ───── Bypass legítimo: proposta de confirmação de data ─────
+            # Se Claude está pausando para confirmar uma data com o usuário
+            # (formato "Confirmando: ... DD/MM/AAAA ...?"), pulamos guardrail
+            # e validador. Esse é o único caso em que a ausência de tool call
+            # não é alucinação — é o fluxo propor→confirmar→executar.
+            preview_text = "\n".join(b.text for b in text_blocks).strip()
+            if _is_date_confirmation_prompt(preview_text):
+                log.info(
+                    "guardrail.date_confirmation_bypass",
+                    preview=preview_text[:240],
+                    tools_called=list(tools_called_this_turn),
+                )
+                await _save_message(user_id, "assistant", preview_text)
+                return preview_text
+
             # ───── Guardrail: verifica ferramentas pendentes ─────
             missing = _detect_pending_actions(message, tools_called_this_turn)
             if missing and guardrail_retries < MAX_GUARDRAIL_RETRIES:
