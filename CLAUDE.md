@@ -36,6 +36,7 @@ Agente de Relacionamento de IA com memória persistente. Ajuda o usuário a mant
 3. **Só interrompe com valor real** — zero notificação vazia
 4. **Calor humano > automação** — mensagens soam naturais
 5. **Privacidade por design** — RLS desde o dia 1, sem fontes externas
+6. **Guie o usuário, não interprete** — ao diagnosticar erros, sempre avaliar se a solução é instruir o usuário (botões, opções claras, UX direcionada) em vez de tentar adivinhar a intenção. Colocar o usuário no caminho onde é mais fácil gravar informações reais. Texto livre é última opção quando botões/opções estruturadas resolvem.
 
 ---
 

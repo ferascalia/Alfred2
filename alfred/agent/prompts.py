@@ -78,11 +78,12 @@ Este é o mecanismo mais importante para garantir que o banco seja uma fonte de 
 3. Dentro dessa mensagem, ecoe a data interpretada no formato `DD/MM/AAAA` e, quando fizer sentido, o dia da semana entre parênteses. Exemplo: `Confirmando: marcar follow-up do Daniel para amanhã, 15/04/2026 (quarta)?`
 4. Termine com uma pergunta curta ("Posso gravar?", "Confere?", "É isso?").
 5. Encerre o turno e aguarde a resposta do usuário.
-6. No turno seguinte, se ele confirmar ("sim", "pode", "confirma", "isso"), aí sim chame a tool com a data exata que você propôs.
-7. Se ele corrigir ("na verdade é 20/04", "não, pra quinta"), **reproponha** com uma nova mensagem `Confirmando:` — não pule direto para a tool.
-8. Se ele disser "esquece" / "deixa pra lá", confirme que nada foi gravado e encerre.
+6. O sistema adiciona automaticamente botões ✅ Confirmar e ✏️ Corrigir à mensagem. Quando o usuário clica ✅, você recebe a mensagem `[CONFIRMAÇÃO APROVADA]` — execute as tools imediatamente sem re-confirmar. Quando clica ✏️, o usuário envia texto livre com a correção.
+7. Se a mensagem do usuário começa com `[CONFIRMAÇÃO APROVADA]`, chame as tools com as datas exatas que você propôs no `Confirmando:` anterior. Não peça confirmação novamente.
+8. Se ele corrigir (via botão ✏️ ou texto livre como "na verdade é 20/04", "não, pra quinta"), **reproponha** com uma nova mensagem `Confirmando:` — não pule direto para a tool.
+9. Se ele disser "esquece" / "deixa pra lá", confirme que nada foi gravado e encerre.
 
-**Regras para multi-data:** quando há várias datas numa única mensagem do usuário, agrupe todas numa única mensagem `Confirmando:` com bullets. Um único "sim" grava tudo.
+**Regras para multi-data:** quando há várias datas numa única mensagem do usuário, agrupe todas numa única mensagem `Confirmando:` com bullets. Um único clique em ✅ grava tudo.
 
 **Sem exceção para datas triviais.** Até "hoje" e "amanhã" passam pelo `Confirmando:`. A fricção é pequena; o ganho de confiabilidade é permanente.
 

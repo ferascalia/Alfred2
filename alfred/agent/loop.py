@@ -77,6 +77,7 @@ _BRT = timezone(timedelta(hours=-3))
 # veracidade) porque a pausa é legítima — não é alucinação.
 # ───────────────────────────────────────────────────────────────
 _DATE_CONFIRM_PREFIX = re.compile(r"^\s*confirmando\s*:", re.IGNORECASE)
+_CONFIRMATION_APPROVED = "[CONFIRMAÇÃO APROVADA]"
 _DATE_NUMERIC = re.compile(
     r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b"
 )
@@ -450,6 +451,15 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     client = get_anthropic()
     messages = list(history)
 
+    # Pula guardrail de pending_actions quando o turno é resposta a uma confirmação
+    # (botão ✅ envia "[CONFIRMAÇÃO APROVADA]" ou último assistant msg era "Confirmando:")
+    skip_pending_guardrail = message.startswith(_CONFIRMATION_APPROVED)
+    if not skip_pending_guardrail:
+        for m in reversed(history[:-1]):  # exclui a msg atual que acabamos de appendar
+            if m.get("role") == "assistant" and isinstance(m.get("content"), str):
+                skip_pending_guardrail = _is_date_confirmation_prompt(m["content"])
+                break
+
     # Tracks every tool name executed neste turno — usado pelo guardrail
     tools_called_this_turn: set[str] = set()
     # Log completo (nome + input) — usado pelo validador de veracidade
@@ -525,7 +535,11 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 return preview_text
 
             # ───── Guardrail: verifica ferramentas pendentes ─────
-            missing = _detect_pending_actions(message, tools_called_this_turn)
+            missing = (
+                _detect_pending_actions(message, tools_called_this_turn)
+                if not skip_pending_guardrail
+                else []
+            )
             if missing and guardrail_retries < MAX_GUARDRAIL_RETRIES:
                 guardrail_retries += 1
                 log.warning(

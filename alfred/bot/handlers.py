@@ -1,4 +1,6 @@
 import asyncio
+import re
+import uuid
 
 import structlog
 from telegram import Update
@@ -72,7 +74,25 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         typing_task.cancel()
         await asyncio.sleep(0)
 
-    await update.message.reply_text(response, parse_mode="Markdown")
+    # Se é confirmação de data, envia com botões inline
+    if re.match(r"^\s*confirmando\s*:", response, re.IGNORECASE):
+        from alfred.bot.keyboards import date_confirm_keyboard
+
+        confirmation_id = uuid.uuid4().hex[:12]
+        # Salva no user_data do PTB para recuperar no callback
+        if context.user_data is not None:
+            context.user_data[f"dateconfirm:{confirmation_id}"] = {
+                "telegram_id": tg_user.id,
+                "user_name": tg_user.full_name,
+                "confirmation_text": response,
+            }
+        await update.message.reply_text(
+            response,
+            parse_mode="Markdown",
+            reply_markup=date_confirm_keyboard(confirmation_id),
+        )
+    else:
+        await update.message.reply_text(response, parse_mode="Markdown")
 
 
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -198,6 +218,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     data = query.data
 
+    if data.startswith("dateconfirm:"):
+        await _handle_date_confirm_callback(query, data, context)
+        return
+
     if data.startswith("import:"):
         await _handle_import_callback(query, data)
         return
@@ -210,6 +234,85 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if action == "nudge":
         await _handle_nudge_callback(query, verb, item_id)
+
+
+async def _handle_date_confirm_callback(
+    query: object, data: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle dateconfirm:yes:{id} and dateconfirm:edit:{id} callbacks."""
+    from telegram import CallbackQuery
+
+    from alfred.agent.loop import run_agent
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        await q.edit_message_text("Ação inválida.")
+        return
+
+    verb, confirmation_id = parts[1], parts[2]
+    pending_key = f"dateconfirm:{confirmation_id}"
+    pending = (context.user_data or {}).get(pending_key)
+
+    if not pending:
+        await q.edit_message_text(
+            "⏳ Essa confirmação expirou. Me diga de novo o que quer registrar."
+        )
+        return
+
+    if verb == "yes":
+        # Remove botões e mostra que foi confirmado
+        original_text = pending["confirmation_text"]
+        await q.edit_message_text(f"{original_text}\n\n✅ _Confirmado_", parse_mode="Markdown")
+
+        # Envia indicador de digitação
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        typing_task = None
+        if chat_id:
+            async def keep_typing() -> None:
+                try:
+                    while True:
+                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                        await asyncio.sleep(4)
+                except asyncio.CancelledError:
+                    pass
+
+            typing_task = context.application.create_task(keep_typing())
+
+        try:
+            response = await run_agent(
+                telegram_id=pending["telegram_id"],
+                user_name=pending["user_name"],
+                message="[CONFIRMAÇÃO APROVADA] Confirmo as datas propostas. Execute as ferramentas agora.",
+            )
+        finally:
+            if typing_task:
+                typing_task.cancel()
+                await asyncio.sleep(0)
+
+        if chat_id:
+            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode="Markdown")
+
+        # Limpa dados pendentes
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+
+    elif verb == "edit":
+        original_text = pending["confirmation_text"]
+        await q.edit_message_text(f"{original_text}\n\n✏️ _Correção solicitada_", parse_mode="Markdown")
+
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        if chat_id:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Sem problemas! Me diga o que quer corrigir — data, pessoa ou ação.",
+            )
+
+        # Limpa dados pendentes — próxima mensagem será processada normalmente
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+    else:
+        await q.edit_message_text("Ação não reconhecida.")
 
 
 async def _handle_nudge_callback(query: object, verb: str, nudge_id: str) -> None:

@@ -23,6 +23,13 @@ def confirm_keyboard(action: str, item_id: str) -> InlineKeyboardMarkup:
     ])
 
 
+def date_confirm_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirmar", callback_data=f"dateconfirm:yes:{confirmation_id}"),
+        InlineKeyboardButton("✏️ Corrigir", callback_data=f"dateconfirm:edit:{confirmation_id}"),
+    ]])
+
+
 def import_confirm_keyboard(file_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Confirmar importação", callback_data=f"import:confirm:{file_id}"),
