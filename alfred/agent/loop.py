@@ -87,12 +87,18 @@ def _is_date_confirmation_prompt(response_text: str) -> bool:
     """True quando Claude está propondo uma data para confirmação do usuário.
 
     Requer DOIS sinais determinísticos simultâneos:
-    - Prefixo literal "Confirmando:" no início da mensagem
+    - Prefixo literal "Confirmando:" no início de qualquer linha/parágrafo
+      (Claude pode criar contatos primeiro e só depois propor a confirmação)
     - Pelo menos uma data numérica (DD/MM, DD/MM/AAAA ou YYYY-MM-DD) no corpo
     """
     if not response_text:
         return False
-    if not _DATE_CONFIRM_PREFIX.match(response_text):
+    # Checa se alguma linha começa com "Confirmando:"
+    has_prefix = any(
+        _DATE_CONFIRM_PREFIX.match(line)
+        for line in response_text.split("\n")
+    )
+    if not has_prefix:
         return False
     if not _DATE_NUMERIC.search(response_text):
         return False
@@ -231,6 +237,12 @@ _NAME_STOPWORDS: set[str] = {
     "Ele", "Ela", "Eles", "Elas", "Isso", "Isto", "Aquilo", "Essa", "Esse", "Este", "Esta",
     "Aqui", "Lá", "La", "Ali", "Agora", "Depois", "Antes", "Então", "Entao",
     "Mas", "Porém", "Porem", "Contudo", "Portanto",
+    # Termos de empresa/organização — não são nomes de contato
+    "Banco", "Mercedes", "Inter", "Itaú", "Itau", "Bradesco", "Santander",
+    "Nubank", "Brasil", "Google", "Apple", "Microsoft", "Amazon",
+    "Igreja", "Empresa", "Grupo", "Instituto", "Fundação", "Fundacao",
+    "Associação", "Associacao", "Companhia", "Ltda", "Eireli",
+    "Capital", "Partners", "Ventures", "Labs", "Tech", "Digital",
 }
 
 
