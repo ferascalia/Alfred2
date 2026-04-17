@@ -480,6 +480,9 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     # Budget compartilhado entre guardrail de input e validador de output.
     guardrail_retries = 0
     MAX_GUARDRAIL_RETRIES = 2
+    # Quando True, pula o validador de veracidade (date-tools foram bloqueadas,
+    # então a resposta é intermediária e não deve ser julgada como final)
+    date_tools_blocked = False
     # Quando True, força tool_choice=any no próximo round para quebrar
     # alucinações em que Claude insiste em emitir texto sem chamar ferramentas
     force_tool_use_next_round = False
@@ -599,10 +602,16 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 final_text = "Feito."
 
             # ───── Validador de veracidade — cruza texto com DB ─────
-            truthfulness_problems = await _validate_response_truthfulness(
-                user_id=user_id,
-                final_text=final_text,
-                tool_calls_log=tool_calls_log,
+            # Pula quando date-tools foram bloqueadas: a resposta é intermediária
+            # ("Confirmando:") e não deve ser julgada como resposta final.
+            truthfulness_problems = (
+                await _validate_response_truthfulness(
+                    user_id=user_id,
+                    final_text=final_text,
+                    tool_calls_log=tool_calls_log,
+                )
+                if not date_tools_blocked
+                else []
             )
             if truthfulness_problems and guardrail_retries < MAX_GUARDRAIL_RETRIES:
                 guardrail_retries += 1
@@ -653,9 +662,11 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 "guardrail.date_tool_without_confirmation",
                 tools=[tc.name for tc in date_tools_requested],
             )
-            # Após bloquear, desativa o pending-actions guardrail para evitar
-            # deadlock (ele exigiria chamar as mesmas tools que bloqueamos).
+            # Após bloquear, desativa pending-actions guardrail e truthfulness
+            # validator para evitar deadlock (eles exigiriam/julgariam as
+            # mesmas tools que bloqueamos).
             skip_pending_guardrail = True
+            date_tools_blocked = True
 
             blocked_results: list[ToolResultBlockParam] = []
             # Extrai as datas que Claude tentou usar para incluir na instrução
