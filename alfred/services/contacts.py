@@ -276,7 +276,7 @@ async def list_upcoming_follow_ups(user_id: str, until_date: str) -> str:
     db = get_db()
     result = (
         db.table("contacts")
-        .select("id, display_name, next_nudge_at")
+        .select("id, display_name, next_nudge_at, company")
         .eq("user_id", user_id)
         .eq("status", "active")
         .not_.is_("next_nudge_at", "null")
@@ -291,10 +291,22 @@ async def list_upcoming_follow_ups(user_id: str, until_date: str) -> str:
             "Não há nada para listar — NÃO invente compromissos."
         )
 
-    lines = [f"**Follow-ups agendados até {parsed.strftime('%d/%m/%Y')}:**"]
+    from collections import defaultdict
+
+    groups: dict[str, list[dict]] = defaultdict(list)
     for c in result.data:
-        when = c["next_nudge_at"][:10]
-        lines.append(f"- **{c['display_name']}** (id: {c['id']}) → {when}")
+        key = c.get("company") or ""
+        groups[key].append(c)
+
+    lines = [f"**Follow-ups agendados até {parsed.strftime('%d/%m/%Y')}:**"]
+    for company in sorted(groups, key=lambda k: (k == "", k)):
+        if company:
+            lines.append(f"\n🏢 **{company}**")
+        else:
+            lines.append("\n👤 **Pessoais / Sem empresa**")
+        for c in groups[company]:
+            when = c["next_nudge_at"][:10]
+            lines.append(f"- **{c['display_name']}** (id: {c['id']}) → {when}")
     return "\n".join(lines)
 
 

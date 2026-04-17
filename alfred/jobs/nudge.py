@@ -128,8 +128,9 @@ Retorne EXATAMENTE neste formato JSON (sem markdown):
 
     bot = Bot(token=settings.telegram_bot_token)
 
+    company_suffix = f" ({contact['company']})" if contact.get("company") else ""
     text = (
-        f"🔔 Faz **{days_since} dias** que você não fala com **{contact['display_name']}**.\n\n"
+        f"🔔 Faz **{days_since} dias** que você não fala com **{contact['display_name']}**{company_suffix}.\n\n"
         f"📝 {reason}\n\n"
         f"✍️ Sugestão de mensagem:\n_{draft}_"
     )
