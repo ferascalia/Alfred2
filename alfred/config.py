@@ -29,5 +29,8 @@ class Settings(BaseSettings):
     # Groq (Whisper)
     groq_api_key: str = ""
 
+    # Railway
+    railway_api_token: str = ""
+
 
 settings = Settings()  # type: ignore[call-arg]

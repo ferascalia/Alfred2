@@ -21,11 +21,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "list_contacts",
-        "description": "Lista contatos do usuário com filtros opcionais.",
+        "description": "Lista contatos do usuário. Busca por nome OU empresa/organização.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "search": {"type": "string", "description": "Filtro por nome (opcional)"},
+                "search": {"type": "string", "description": "Filtro por nome ou empresa (opcional). Ex: 'BTG Pactual', 'Maria', 'Google'"},
                 "status": {"type": "string", "enum": ["active", "paused", "archived"], "default": "active"},
                 "limit": {"type": "integer", "default": 20},
             },

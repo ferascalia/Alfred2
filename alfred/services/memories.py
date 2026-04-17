@@ -78,7 +78,26 @@ async def search_memories(
     if not result.data:
         return "Nenhuma memória encontrada para essa busca."
 
+    contact_ids = {m["contact_id"] for m in result.data if m.get("contact_id")}
+    contact_map: dict[str, dict] = {}
+    if contact_ids:
+        contacts_result = (
+            get_db()
+            .table("contacts")
+            .select("id, display_name, company")
+            .in_("id", list(contact_ids))
+            .execute()
+        )
+        for c in contacts_result.data or []:
+            contact_map[c["id"]] = c
+
     lines = []
     for m in result.data:
-        lines.append(f"- [{m.get('kind', '?')}] {m['content']}")
+        cid = m.get("contact_id")
+        contact_info = ""
+        if cid and cid in contact_map:
+            c = contact_map[cid]
+            company_part = f", {c['company']}" if c.get("company") else ""
+            contact_info = f" (contato: {c['display_name']}{company_part}, id: {cid})"
+        lines.append(f"- [{m.get('kind', '?')}] {m['content']}{contact_info}")
     return "\n".join(lines)

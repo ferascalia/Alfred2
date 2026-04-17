@@ -20,7 +20,7 @@ async def list_contacts(
     db = get_db()
     q = db.table("contacts").select("*").eq("user_id", user_id).eq("status", status).limit(limit)
     if search:
-        q = q.ilike("display_name", f"%{search}%")
+        q = q.or_(f"display_name.ilike.%{search}%,company.ilike.%{search}%")
     result = q.order("display_name").execute()
 
     if not result.data:
@@ -37,7 +37,8 @@ async def list_contacts(
     for c in result.data:
         last = c.get("last_interaction_at")
         last_str = f" | último contato: {last[:10]}" if last else ""
-        lines.append(f"- **{c['display_name']}** (id: {c['id']}){last_str}")
+        company_str = f" | empresa: {c.get('company')}" if c.get("company") else ""
+        lines.append(f"- **{c['display_name']}** (id: {c['id']}){company_str}{last_str}")
 
     # Hint para contatos existentes: lembrar de executar ações encadeadas
     if search and result.data:
