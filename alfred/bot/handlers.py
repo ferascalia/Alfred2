@@ -11,6 +11,44 @@ from alfred.db.client import get_db
 log = structlog.get_logger()
 
 
+def _has_date_confirmation(text: str) -> bool:
+    """Check if any line starts with 'Confirmando:' (case-insensitive)."""
+    return any(
+        re.match(r"^\s*confirmando\s*:", line, re.IGNORECASE)
+        for line in text.split("\n")
+    )
+
+
+async def _send_response_with_confirmation(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    response: str,
+    telegram_id: int,
+    user_name: str,
+) -> None:
+    """Send response, adding inline confirmation buttons if it contains 'Confirmando:'."""
+    if not update.message:
+        return
+
+    if _has_date_confirmation(response):
+        from alfred.bot.keyboards import date_confirm_keyboard
+
+        confirmation_id = uuid.uuid4().hex[:12]
+        if context.user_data is not None:
+            context.user_data[f"dateconfirm:{confirmation_id}"] = {
+                "telegram_id": telegram_id,
+                "user_name": user_name,
+                "confirmation_text": response,
+            }
+        await update.message.reply_text(
+            response,
+            parse_mode="Markdown",
+            reply_markup=date_confirm_keyboard(confirmation_id),
+        )
+    else:
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
@@ -74,25 +112,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         typing_task.cancel()
         await asyncio.sleep(0)
 
-    # Se é confirmação de data, envia com botões inline
-    if re.match(r"^\s*confirmando\s*:", response, re.IGNORECASE):
-        from alfred.bot.keyboards import date_confirm_keyboard
-
-        confirmation_id = uuid.uuid4().hex[:12]
-        # Salva no user_data do PTB para recuperar no callback
-        if context.user_data is not None:
-            context.user_data[f"dateconfirm:{confirmation_id}"] = {
-                "telegram_id": tg_user.id,
-                "user_name": tg_user.full_name,
-                "confirmation_text": response,
-            }
-        await update.message.reply_text(
-            response,
-            parse_mode="Markdown",
-            reply_markup=date_confirm_keyboard(confirmation_id),
-        )
-    else:
-        await update.message.reply_text(response, parse_mode="Markdown")
+    await _send_response_with_confirmation(
+        update, context, response, tg_user.id, tg_user.full_name,
+    )
 
 
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -136,9 +158,9 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         typing_task.cancel()
         await asyncio.sleep(0)
 
-    await update.message.reply_text(
-        f"🎙️ _{text}_\n\n{response}" if "text" in dir() else response,
-        parse_mode="Markdown",
+    prefix = f"🎙️ _{text}_\n\n" if "text" in dir() else ""
+    await _send_response_with_confirmation(
+        update, context, prefix + response, tg_user.id, tg_user.full_name,
     )
 
 

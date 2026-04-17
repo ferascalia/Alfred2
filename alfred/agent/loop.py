@@ -645,6 +645,52 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
             await _save_message(user_id, "assistant", final_text)
             return final_text
 
+        # ───── Guardrail: bloqueia tools de data sem confirmação prévia ─────
+        _DATE_TOOLS = {"set_follow_up", "log_interaction"}
+        date_tools_requested = [tc for tc in tool_calls if tc.name in _DATE_TOOLS]
+        if date_tools_requested and not skip_pending_guardrail:
+            log.warning(
+                "guardrail.date_tool_without_confirmation",
+                tools=[tc.name for tc in date_tools_requested],
+            )
+            # Devolvemos as tool calls como erro e forçamos Claude a propor "Confirmando:"
+            blocked_results: list[ToolResultBlockParam] = []
+            for tool_call in tool_calls:
+                if tool_call.name in _DATE_TOOLS:
+                    blocked_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call.id,
+                        "content": (
+                            "BLOQUEADO: esta ferramenta só pode ser chamada DEPOIS que o "
+                            "usuário confirmar a data via botão ✅. Primeiro, responda com uma "
+                            "mensagem começando com 'Confirmando:' listando as datas propostas "
+                            "no formato DD/MM/AAAA. NÃO chame esta ferramenta novamente até "
+                            "receber '[CONFIRMAÇÃO APROVADA]'."
+                        ),
+                        "is_error": True,
+                    })
+                else:
+                    # Executa ferramentas que não envolvem data normalmente
+                    tools_called_this_turn.add(tool_call.name)
+                    tool_calls_log.append((tool_call.name, dict(tool_call.input)))  # type: ignore[arg-type]
+                    try:
+                        result = await dispatch_tool(
+                            tool_name=tool_call.name,
+                            tool_input=dict(tool_call.input),  # type: ignore[arg-type]
+                            user_id=user_id,
+                        )
+                    except Exception as exc:
+                        log.exception("tool.error", tool=tool_call.name)
+                        result = f"Erro ao executar ferramenta: {exc}"
+                    blocked_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call.id,
+                        "content": result,
+                    })
+            messages.append({"role": "assistant", "content": response.content})  # type: ignore[typeddict-item]
+            messages.append({"role": "user", "content": blocked_results})  # type: ignore[typeddict-item]
+            continue
+
         # Execute tool calls
         tool_results: list[ToolResultBlockParam] = []
         for tool_call in tool_calls:
