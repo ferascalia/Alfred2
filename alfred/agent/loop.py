@@ -653,8 +653,23 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 "guardrail.date_tool_without_confirmation",
                 tools=[tc.name for tc in date_tools_requested],
             )
-            # Devolvemos as tool calls como erro e forçamos Claude a propor "Confirmando:"
+            # Após bloquear, desativa o pending-actions guardrail para evitar
+            # deadlock (ele exigiria chamar as mesmas tools que bloqueamos).
+            skip_pending_guardrail = True
+
             blocked_results: list[ToolResultBlockParam] = []
+            # Extrai as datas que Claude tentou usar para incluir na instrução
+            attempted_dates: list[str] = []
+            for tc in date_tools_requested:
+                inp = dict(tc.input)  # type: ignore[arg-type]
+                d = inp.get("date") or inp.get("happened_at") or ""
+                if d:
+                    attempted_dates.append(d)
+            date_hint = ""
+            if attempted_dates:
+                formatted = ", ".join(attempted_dates)
+                date_hint = f" As datas que você calculou ({formatted}) estão corretas — inclua-as no formato DD/MM/AAAA."
+
             for tool_call in tool_calls:
                 if tool_call.name in _DATE_TOOLS:
                     blocked_results.append({
@@ -662,15 +677,17 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                         "tool_use_id": tool_call.id,
                         "content": (
                             "BLOQUEADO: esta ferramenta só pode ser chamada DEPOIS que o "
-                            "usuário confirmar a data via botão ✅. Primeiro, responda com uma "
-                            "mensagem começando com 'Confirmando:' listando as datas propostas "
-                            "no formato DD/MM/AAAA. NÃO chame esta ferramenta novamente até "
-                            "receber '[CONFIRMAÇÃO APROVADA]'."
+                            "usuário confirmar a data via botão ✅. Responda APENAS com texto "
+                            "(sem chamar nenhuma ferramenta) começando com a palavra "
+                            "'Confirmando:' seguida das datas no formato DD/MM/AAAA. "
+                            "Exemplo: 'Confirmando: follow-up do Fulano para 23/04/2026 (quarta)?'"
+                            f"{date_hint} "
+                            "NÃO chame esta ferramenta novamente até receber "
+                            "'[CONFIRMAÇÃO APROVADA]'."
                         ),
                         "is_error": True,
                     })
                 else:
-                    # Executa ferramentas que não envolvem data normalmente
                     tools_called_this_turn.add(tool_call.name)
                     tool_calls_log.append((tool_call.name, dict(tool_call.input)))  # type: ignore[arg-type]
                     try:
