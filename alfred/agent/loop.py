@@ -476,13 +476,9 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     tools_called_this_turn: set[str] = set()
     # Log completo (nome + input) — usado pelo validador de veracidade
     tool_calls_log: list[tuple[str, dict]] = []
-    # Quantas vezes o guardrail reinjetou lembrete (evita loop infinito).
-    # Budget compartilhado entre guardrail de input e validador de output.
-    guardrail_retries = 0
-    MAX_GUARDRAIL_RETRIES = 2
-    # Quando True, pula o validador de veracidade (date-tools foram bloqueadas,
-    # então a resposta é intermediária e não deve ser julgada como final)
-    date_tools_blocked = False
+    # Quantas vezes o pending-actions guardrail reinjetou lembrete (evita loop infinito).
+    pending_retries = 0
+    MAX_PENDING_RETRIES = 2
     # Quando True, força tool_choice=any no próximo round para quebrar
     # alucinações em que Claude insiste em emitir texto sem chamar ferramentas
     force_tool_use_next_round = False
@@ -555,13 +551,13 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 if not skip_pending_guardrail
                 else []
             )
-            if missing and guardrail_retries < MAX_GUARDRAIL_RETRIES:
-                guardrail_retries += 1
+            if missing and pending_retries < MAX_PENDING_RETRIES:
+                pending_retries += 1
                 log.warning(
                     "guardrail.pending_actions",
                     missing=missing,
                     tools_called=list(tools_called_this_turn),
-                    retry=guardrail_retries,
+                    retry=pending_retries,
                 )
                 reminder_text = (
                     "⚠️ STOP. IGNORE qualquer confirmação anterior no histórico — aquilo pode "
@@ -601,54 +597,18 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
             if not final_text:
                 final_text = "Feito."
 
-            # ───── Validador de veracidade — cruza texto com DB ─────
-            # Pula quando date-tools foram bloqueadas: a resposta é intermediária
-            # ("Confirmando:") e não deve ser julgada como resposta final.
-            truthfulness_problems = (
-                await _validate_response_truthfulness(
-                    user_id=user_id,
-                    final_text=final_text,
-                    tool_calls_log=tool_calls_log,
-                )
-                if not date_tools_blocked
-                else []
+            # ───── Validador de veracidade — observabilidade, não bloqueante ─────
+            truthfulness_problems = await _validate_response_truthfulness(
+                user_id=user_id,
+                final_text=final_text,
+                tool_calls_log=tool_calls_log,
             )
-            if truthfulness_problems and guardrail_retries < MAX_GUARDRAIL_RETRIES:
-                guardrail_retries += 1
-                log.warning(
-                    "validator.untruthful_response",
-                    problems=truthfulness_problems,
-                    tools_called=list(tools_called_this_turn),
-                    retry=guardrail_retries,
-                )
-                reminder_text = (
-                    "⚠️ STOP. Sua resposta contém afirmações que não correspondem ao que foi "
-                    "realmente executado neste turno, ou menciona pessoas que não estão no banco.\n\n"
-                    "Problemas detectados:\n\n"
-                    + "\n".join(truthfulness_problems)
-                    + "\n\nCorrija AGORA: ou execute as ferramentas que faltam, ou reescreva "
-                    "a resposta sem inventar fatos. NUNCA confirme algo que você não fez. "
-                    "Se não encontrou um contato, diga isso explicitamente e pergunte se deve criar."
-                )
-                messages.append({"role": "assistant", "content": response.content})  # type: ignore[typeddict-item]
-                messages.append({"role": "user", "content": reminder_text})
-                force_tool_use_next_round = True
-                continue
-
             if truthfulness_problems:
-                # Validador esgotou retries — pede confirmação ao usuário em vez de mentir
-                log.error(
-                    "validator.exhausted",
+                log.warning(
+                    "validator.truthfulness_issues",
                     problems=truthfulness_problems,
                     tools_called=list(tools_called_this_turn),
                 )
-                error_msg = (
-                    "Não consegui validar o que ia te responder — alguma informação não "
-                    "bateu com o que está salvo. Pode me confirmar exatamente o que você "
-                    "quer que eu faça (quem, quando, o quê)? Vou refazer do zero. 🙏"
-                )
-                await _save_message(user_id, "assistant", error_msg)
-                return error_msg
 
             # Save assistant message
             await _save_message(user_id, "assistant", final_text)
@@ -662,11 +622,9 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 "guardrail.date_tool_without_confirmation",
                 tools=[tc.name for tc in date_tools_requested],
             )
-            # Após bloquear, desativa pending-actions guardrail e truthfulness
-            # validator para evitar deadlock (eles exigiriam/julgariam as
-            # mesmas tools que bloqueamos).
+            # Após bloquear, desativa pending-actions guardrail para evitar
+            # deadlock (ele exigiria chamar as mesmas tools que bloqueamos).
             skip_pending_guardrail = True
-            date_tools_blocked = True
 
             blocked_results: list[ToolResultBlockParam] = []
             # Extrai as datas que Claude tentou usar para incluir na instrução
