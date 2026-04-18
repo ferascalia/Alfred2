@@ -7,6 +7,8 @@ import httpx
 import structlog
 
 from alfred.config import settings
+from alfred.db.client import get_db
+from alfred.services.contacts import create_contact_confirmed, find_similar_contacts
 
 log = structlog.get_logger()
 
@@ -288,8 +290,6 @@ async def bulk_import(user_id: str, rows: list[dict[str, Any]]) -> dict[str, Any
 
     Returns {"created": N, "skipped": [names]}.
     """
-    from alfred.services.contacts import create_contact_confirmed, find_similar_contacts
-
     created = 0
     skipped: list[str] = []
 
@@ -305,3 +305,246 @@ async def bulk_import(user_id: str, rows: list[dict[str, Any]]) -> dict[str, Any
 
     log.info("import.completed", user_id=user_id, created=created, skipped=len(skipped))
     return {"created": created, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# Duplicate detection (Task 3)
+# ---------------------------------------------------------------------------
+
+async def check_duplicates(
+    user_id: str,
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separate rows into clean (no match) and duplicates (with existing match).
+
+    Each duplicate entry: ``{"csv_row": {...}, "existing": {"id", "display_name", "company"}}``.
+    Uses ``find_similar_contacts`` from ``alfred.services.contacts``.
+    """
+    clean: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
+
+    for row in rows:
+        name = row["display_name"]
+        similar = await find_similar_contacts(user_id=user_id, display_name=name)
+        if similar:
+            duplicates.append({"csv_row": row, "existing": similar[0]})
+        else:
+            clean.append(row)
+
+    log.info(
+        "import.check_duplicates",
+        user_id=user_id,
+        clean=len(clean),
+        duplicates=len(duplicates),
+    )
+    return clean, duplicates
+
+
+def build_grouped_preview(
+    clean: list[dict[str, Any]],
+    duplicates: list[dict[str, Any]],
+) -> str:
+    """Build a grouped preview: ✅ N novos + ⚠️ M duplicatas."""
+    lines: list[str] = []
+
+    n_clean = len(clean)
+    if n_clean:
+        s = "s" if n_clean != 1 else ""
+        lines.append(f"✅ *{n_clean} contato{s} novo{s}:*")
+        for c in clean[:10]:
+            parts: list[str] = []
+            if c.get("company"):
+                parts.append(c["company"])
+            if c.get("role"):
+                parts.append(c["role"])
+            suffix = f" — {' · '.join(parts)}" if parts else ""
+            lines.append(f"• {c['display_name']}{suffix}")
+        if n_clean > 10:
+            lines.append(f"_...e mais {n_clean - 10}_")
+
+    n_dup = len(duplicates)
+    if n_dup:
+        if lines:
+            lines.append("")
+        s = "s" if n_dup != 1 else ""
+        lines.append(f"⚠️ *{n_dup} duplicata{s} detectada{s}:*")
+        for dup in duplicates:
+            csv_name = dup["csv_row"]["display_name"]
+            existing = dup["existing"]
+            ex_name = existing.get("display_name", "?")
+            ex_company = existing.get("company") or ""
+            ex_label = f"{ex_name}" + (f" ({ex_company})" if ex_company else "")
+            lines.append(f"• {csv_name} → existente: {ex_label}")
+
+    return "\n".join(lines)
+
+
+def build_duplicate_comparison(dup: dict[str, Any], index: int, total: int) -> str:
+    """Side-by-side comparison for a single duplicate: CSV data vs existing data."""
+    csv_row = dup["csv_row"]
+    existing = dup["existing"]
+
+    csv_name = csv_row.get("display_name", "?")
+    ex_name = existing.get("display_name", "?")
+
+    lines = [f"📊 *Duplicata {index}/{total} — {csv_name}*\n"]
+
+    lines.append("📄 *CSV (novo):*")
+    for field in ("display_name", "company", "role", "relationship_type", "how_we_met", "cadence_days", "tags"):
+        val = csv_row.get(field)
+        if val:
+            lines.append(f"  • {field}: {val}")
+
+    lines.append("\n👤 *Existente no Alfred:*")
+    lines.append(f"  • display\\_name: {ex_name}")
+    if existing.get("company"):
+        lines.append(f"  • company: {existing['company']}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Merge, replace, execute_import (Task 4)
+# ---------------------------------------------------------------------------
+
+MERGEABLE_FIELDS = ["company", "role", "relationship_type", "how_we_met", "tags"]
+
+
+async def merge_contact(user_id: str, existing_id: str, csv_row: dict[str, Any]) -> str:
+    """Fetch existing contact and update only empty fields with CSV data."""
+    db = get_db()
+    result = (
+        db.table("contacts")
+        .select("id, display_name, company, role, relationship_type, how_we_met, tags")
+        .eq("user_id", user_id)
+        .eq("id", existing_id)
+        .single()
+        .execute()
+    )
+    existing = result.data
+
+    updates: dict[str, Any] = {}
+    for field in MERGEABLE_FIELDS:
+        existing_val = existing.get(field)
+        csv_val = csv_row.get(field)
+        # Only fill if existing is empty/None and CSV has a value
+        if not existing_val and csv_val:
+            updates[field] = csv_val
+
+    if updates:
+        db.table("contacts").update(updates).eq("user_id", user_id).eq("id", existing_id).execute()
+        log.info("import.merge_contact", user_id=user_id, contact_id=existing_id, fields=list(updates.keys()))
+    else:
+        log.info("import.merge_contact.no_changes", user_id=user_id, contact_id=existing_id)
+
+    name = existing.get("display_name", existing_id)
+    return f"Contato **{name}** mesclado (campos preenchidos: {', '.join(updates.keys()) or 'nenhum'})."
+
+
+async def replace_contact(user_id: str, existing_id: str, csv_row: dict[str, Any]) -> str:
+    """Overwrite existing contact fields with all CSV data."""
+    updates: dict[str, Any] = {}
+    for field in MERGEABLE_FIELDS:
+        csv_val = csv_row.get(field)
+        if csv_val is not None:
+            updates[field] = csv_val
+
+    # Also update display_name and cadence_days if present
+    for field in ("display_name", "cadence_days"):
+        if csv_row.get(field):
+            updates[field] = csv_row[field]
+
+    db = get_db()
+    db.table("contacts").update(updates).eq("user_id", user_id).eq("id", existing_id).execute()
+    log.info("import.replace_contact", user_id=user_id, contact_id=existing_id)
+
+    name = csv_row.get("display_name", existing_id)
+    return f"Contato **{name}** substituído com dados do CSV."
+
+
+async def execute_import(
+    user_id: str,
+    clean_rows: list[dict[str, Any]],
+    duplicates: list[dict[str, Any]],
+    decisions: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute full import.
+
+    Decisions are read from ``dup["decision"]`` (embedded in each duplicate dict).
+    Valid values: "skip", "import_new", "merge", "replace".
+
+    Returns {"created", "skipped", "merged", "replaced", "merged_details"}.
+    """
+    created = 0
+    skipped = 0
+    merged = 0
+    replaced = 0
+    merged_details: list[str] = []
+
+    # Import all clean rows
+    for row in clean_rows:
+        await create_contact_confirmed(user_id=user_id, **row)
+        created += 1
+
+    # Apply decisions for duplicates
+    for dup in duplicates:
+        decision = dup.get("decision") or decisions.get(dup["csv_row"]["display_name"], "skip")
+        csv_row = dup["csv_row"]
+        existing_id = dup["existing"]["id"]
+
+        if decision == "skip":
+            skipped += 1
+        elif decision == "import_new":
+            await create_contact_confirmed(user_id=user_id, **csv_row)
+            created += 1
+        elif decision == "merge":
+            result_msg = await merge_contact(user_id, existing_id, csv_row)
+            merged += 1
+            merged_details.append(result_msg)
+        elif decision == "replace":
+            await replace_contact(user_id, existing_id, csv_row)
+            replaced += 1
+        else:
+            # Default: skip unknown decisions
+            skipped += 1
+
+    log.info(
+        "import.execute_import",
+        user_id=user_id,
+        created=created,
+        skipped=skipped,
+        merged=merged,
+        replaced=replaced,
+    )
+    return {
+        "created": created,
+        "skipped": skipped,
+        "merged": merged,
+        "replaced": replaced,
+        "merged_details": merged_details,
+    }
+
+
+def build_import_report(result: dict[str, Any]) -> str:
+    """Build a final import report in MarkdownV2 format."""
+    created = result.get("created", 0)
+    skipped = result.get("skipped", 0)
+    merged = result.get("merged", 0)
+    replaced = result.get("replaced", 0)
+
+    lines = [r"✅ *Importação concluída\!*", ""]
+
+    if created:
+        s = "s" if created != 1 else ""
+        lines.append(f"• {created} contato{s} criado{s}")
+    if merged:
+        s = "s" if merged != 1 else ""
+        lines.append(f"• {merged} contato{s} mesclado{s}")
+    if replaced:
+        s = "s" if replaced != 1 else ""
+        lines.append(f"• {replaced} contato{s} substituído{s}")
+    if skipped:
+        s = "s" if skipped != 1 else ""
+        lines.append(f"• {skipped} duplicata{s} ignorada{s}")
+
+    return "\n".join(lines)
