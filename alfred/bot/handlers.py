@@ -10,6 +10,20 @@ from alfred.db.client import get_db
 
 log = structlog.get_logger()
 
+_import_states: dict[str, dict] = {}
+
+
+def _get_import_state(user_id: str) -> dict | None:
+    return _import_states.get(user_id)
+
+
+def _set_import_state(user_id: str, state: dict) -> None:
+    _import_states[user_id] = state
+
+
+def _clear_import_state(user_id: str) -> None:
+    _import_states.pop(user_id, None)
+
 
 def _has_date_confirmation(text: str) -> bool:
     """Check if any line starts with 'Confirmando:' (case-insensitive)."""
@@ -171,7 +185,7 @@ async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     import io
 
-    from alfred.services.import_csv import build_template_csv
+    from alfred.services.import_contacts import build_template_csv
 
     csv_bytes = build_template_csv()
 
@@ -182,7 +196,7 @@ async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_T
             "📥 *Como importar contatos em massa:*\n\n"
             "1\\. Abra o arquivo `template_alfred.csv` no Excel ou Google Sheets\n"
             "2\\. Preencha uma linha por contato\n"
-            "3\\. Salve como CSV e envie aqui\n\n"
+            "3\\. Salve como CSV ou envie a planilha Excel \\(\\.xlsx\\) direto\n\n"
             "*Colunas disponíveis:*\n"
             "• `display_name` — obrigatório\n"
             "• `company`, `role`, `how_we_met` — texto livre\n"
@@ -196,38 +210,61 @@ async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def import_document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle CSV file upload — validate and show preview with confirm/cancel buttons."""
+    """Handle CSV/XLSX file upload — validate, detect duplicates, show grouped preview."""
     if not update.effective_user or not update.message or not update.message.document:
         return
-
-    from alfred.bot.keyboards import import_confirm_keyboard
-    from alfred.services.import_csv import build_preview, download_csv, parse_and_validate
+    from alfred.bot.keyboards import import_preview_keyboard
+    from alfred.services.import_contacts import (
+        build_grouped_preview,
+        check_duplicates,
+        download_file,
+        parse_and_validate,
+        parse_xlsx,
+    )
 
     tg_user = update.effective_user
     doc = update.message.document
-    chat_id = update.effective_chat.id  # type: ignore[union-attr]
+    file_name = (doc.file_name or "").lower()
 
-    log.info("import.csv_received", telegram_id=tg_user.id, file_name=doc.file_name)
-
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    log.info("import.file_received", telegram_id=tg_user.id, file_name=file_name)
 
     try:
-        csv_bytes = await download_csv(doc.file_id)
+        file_bytes = await download_file(doc.file_id)
     except Exception:
         log.exception("import.download_failed")
         await update.message.reply_text("Não consegui baixar o arquivo. Tente novamente.")
         return
 
-    rows, errors = parse_and_validate(csv_bytes)
+    if file_name.endswith(".xlsx"):
+        rows, errors = parse_xlsx(file_bytes)
+    else:
+        rows, errors = parse_and_validate(file_bytes)
 
     if errors:
-        error_text = "❌ *Erros encontrados no CSV:*\n\n" + "\n".join(f"• {e}" for e in errors)
-        error_text += "\n\nCorrija o arquivo e envie novamente."
+        error_text = "❌ *Erros encontrados no arquivo:*\n\n" + "\n".join(f"• {e}" for e in errors)
         await update.message.reply_text(error_text, parse_mode="Markdown")
         return
 
-    preview = build_preview(rows)
-    keyboard = import_confirm_keyboard(doc.file_id)
+    db = get_db()
+    user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
+    if not user_result.data:
+        await update.message.reply_text("Use /start primeiro para se registrar.")
+        return
+    user_id = user_result.data["id"]
+
+    clean, duplicates = await check_duplicates(user_id=user_id, rows=rows)
+
+    _set_import_state(user_id, {
+        "clean_rows": clean,
+        "duplicates": duplicates,
+        "decisions": {},
+        "current_review_index": 0,
+    })
+
+    preview = build_grouped_preview(clean, duplicates)
+    has_duplicates = len(duplicates) > 0
+    keyboard = import_preview_keyboard(user_id, has_duplicates=has_duplicates)
+
     await update.message.reply_text(preview, parse_mode="Markdown", reply_markup=keyboard)
 
 
@@ -362,11 +399,15 @@ async def _handle_nudge_callback(query: object, verb: str, nudge_id: str) -> Non
 
 
 async def _handle_import_callback(query: object, data: str) -> None:
-    """Handle import:confirm:{file_id} and import:cancel callbacks."""
+    """Handle all import callbacks: preview actions and duplicate review decisions."""
     from telegram import CallbackQuery
 
-    from alfred.db.client import get_db
-    from alfred.services.import_csv import bulk_import, download_csv, parse_and_validate
+    from alfred.bot.keyboards import duplicate_review_keyboard
+    from alfred.services.import_contacts import (
+        build_duplicate_comparison,
+        build_import_report,
+        execute_import,
+    )
 
     q: CallbackQuery = query  # type: ignore[assignment]
 
@@ -374,49 +415,84 @@ async def _handle_import_callback(query: object, data: str) -> None:
         await q.edit_message_text("❌ Importação cancelada.")
         return
 
-    # data = "import:confirm:{file_id}"
-    parts = data.split(":", 2)
+    parts = data.split(":")
     if len(parts) < 3:
         await q.edit_message_text("Ação inválida.")
         return
 
-    file_id = parts[2]
+    action = parts[1]
+    user_id = parts[2]
 
-    if not q.from_user:
+    state = _get_import_state(user_id)
+    if not state:
+        await q.edit_message_text("Sessão de importação expirada. Envie o arquivo novamente.")
         return
 
-    db = get_db()
-    user_result = (
-        db.table("users").select("id").eq("telegram_id", q.from_user.id).single().execute()
-    )
-    if not user_result.data:
-        await q.edit_message_text("Usuário não encontrado. Use /start primeiro.")
-        return
+    clean_rows = state["clean_rows"]
+    duplicates = state["duplicates"]
+    decisions = state["decisions"]
 
-    user_id = user_result.data["id"]
+    def _decisions_by_name(index_decisions: dict) -> dict:
+        """Convert {int_index: decision} to {display_name: decision} for execute_import."""
+        result: dict = {}
+        for idx, decision in index_decisions.items():
+            try:
+                dup = duplicates[int(idx)]
+                name = dup["csv_row"]["display_name"]
+                result[name] = decision
+            except (IndexError, KeyError):
+                pass
+        return result
 
-    await q.edit_message_text("⏳ Importando contatos...")
+    if action == "confirm_all":
+        await q.edit_message_text("⏳ Importando contatos...")
+        result = await execute_import(user_id, clean_rows, [], {})
+        _clear_import_state(user_id)
+        report = build_import_report(result)
+        await q.edit_message_text(report, parse_mode="MarkdownV2")
 
-    try:
-        csv_bytes = await download_csv(file_id)
-    except Exception:
-        log.exception("import.confirm_download_failed")
-        await q.edit_message_text("Não consegui baixar o arquivo. Envie o CSV novamente com /import.")
-        return
+    elif action == "clean_and_skip":
+        await q.edit_message_text("⏳ Importando contatos...")
+        all_skip = {i: "skip" for i in range(len(duplicates))}
+        result = await execute_import(user_id, clean_rows, duplicates, _decisions_by_name(all_skip))
+        _clear_import_state(user_id)
+        report = build_import_report(result)
+        await q.edit_message_text(report, parse_mode="MarkdownV2")
 
-    rows, errors = parse_and_validate(csv_bytes)
-    if errors:
-        await q.edit_message_text("❌ O arquivo parece ter sido modificado. Envie novamente.")
-        return
+    elif action == "import_all":
+        await q.edit_message_text("⏳ Importando contatos...")
+        all_new = {i: "import_new" for i in range(len(duplicates))}
+        result = await execute_import(user_id, clean_rows, duplicates, _decisions_by_name(all_new))
+        _clear_import_state(user_id)
+        report = build_import_report(result)
+        await q.edit_message_text(report, parse_mode="MarkdownV2")
 
-    result = await bulk_import(user_id=user_id, rows=rows)
-    created = result["created"]
-    skipped: list[str] = result["skipped"]
+    elif action == "review":
+        state["current_review_index"] = 0
+        dup = duplicates[0]
+        comparison = build_duplicate_comparison(dup, 0, len(duplicates))
+        keyboard = duplicate_review_keyboard(user_id, 0)
+        await q.edit_message_text(comparison, parse_mode="Markdown", reply_markup=keyboard)
 
-    s_c = "s" if created != 1 else ""
-    msg = f"✅ *{created} contato{s_c} criado{s_c}.*"
-    if skipped:
-        s_s = "s" if len(skipped) != 1 else ""
-        msg += f"\n\n⚠️ {len(skipped)} duplicata{s_s} ignorada{s_s}: {', '.join(skipped)}."
+    elif action.startswith("dup_"):
+        if len(parts) < 4:
+            return
+        dup_action = action.replace("dup_", "")
+        dup_index = int(parts[3])
 
-    await q.edit_message_text(msg, parse_mode="Markdown")
+        action_map = {"skip": "skip", "new": "import_new", "merge": "merge", "replace": "replace"}
+        decisions[dup_index] = action_map.get(dup_action, "skip")
+
+        next_index = dup_index + 1
+        if next_index < len(duplicates):
+            state["current_review_index"] = next_index
+            dup = duplicates[next_index]
+            comparison = build_duplicate_comparison(dup, next_index, len(duplicates))
+            keyboard = duplicate_review_keyboard(user_id, next_index)
+            await q.edit_message_text(comparison, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await q.edit_message_text("⏳ Importando contatos...")
+            result = await execute_import(user_id, clean_rows, duplicates, _decisions_by_name(decisions))
+            _clear_import_state(user_id)
+            report = build_import_report(result)
+            await q.edit_message_text(report, parse_mode="MarkdownV2")

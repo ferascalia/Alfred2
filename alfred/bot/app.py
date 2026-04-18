@@ -28,7 +28,10 @@ def build_application() -> Application:  # type: ignore[type-arg]
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("import", import_command_handler))
     app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.Document.FileExtension("csv"), import_document_handler))
+    app.add_handler(MessageHandler(
+        filters.Document.FileExtension("csv") | filters.Document.FileExtension("xlsx"),
+        import_document_handler,
+    ))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))
 
