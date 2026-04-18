@@ -109,6 +109,10 @@ async def get_contact_digest(user_id: str, contact_id: str) -> str:
         for i in interactions.data:
             lines.append(f"- {i['happened_at'][:10]} via {i['channel']}: {i['summary']}")
 
+    network = await get_contact_network(user_id, contact_id)
+    if network:
+        lines.append(f"\n📌 **Conexões:**\n{network}")
+
     return "\n".join(lines)
 
 
@@ -357,3 +361,112 @@ Escreva APENAS o texto da mensagem, sem explicações ou aspas. A mensagem deve 
     )
     text_blocks = [b for b in response.content if isinstance(b, TextBlock)]
     return "\n".join(b.text for b in text_blocks).strip()
+
+
+async def get_contact_network(user_id: str, contact_id: str) -> str:
+    db = get_db()
+    rels = (
+        db.table("contact_relationships")
+        .select("to_contact_id, label")
+        .eq("user_id", user_id)
+        .eq("from_contact_id", contact_id)
+        .execute()
+    )
+    if not rels.data:
+        return ""
+
+    to_ids = [r["to_contact_id"] for r in rels.data]
+    contacts_result = (
+        db.table("contacts")
+        .select("id, display_name")
+        .in_("id", to_ids)
+        .execute()
+    )
+    name_map = {c["id"]: c["display_name"] for c in contacts_result.data}
+
+    lines = []
+    for r in rels.data:
+        name = name_map.get(r["to_contact_id"], "?")
+        lines.append(f"- {name}: {r['label']}")
+    return "\n".join(lines)
+
+
+async def link_contacts(
+    user_id: str,
+    from_contact_id: str,
+    to_contact_id: str,
+    from_label: str,
+    to_label: str,
+) -> str:
+    db = get_db()
+
+    names_result = (
+        db.table("contacts")
+        .select("id, display_name")
+        .eq("user_id", user_id)
+        .in_("id", [from_contact_id, to_contact_id])
+        .execute()
+    )
+    name_map = {c["id"]: c["display_name"] for c in names_result.data}
+    from_name = name_map.get(from_contact_id, "?")
+    to_name = name_map.get(to_contact_id, "?")
+
+    db.table("contact_relationships").upsert(
+        {
+            "user_id": user_id,
+            "from_contact_id": from_contact_id,
+            "to_contact_id": to_contact_id,
+            "label": from_label,
+        },
+        on_conflict="user_id,from_contact_id,to_contact_id",
+    ).execute()
+
+    db.table("contact_relationships").upsert(
+        {
+            "user_id": user_id,
+            "from_contact_id": to_contact_id,
+            "to_contact_id": from_contact_id,
+            "label": to_label,
+        },
+        on_conflict="user_id,from_contact_id,to_contact_id",
+    ).execute()
+
+    log.info(
+        "contacts.linked",
+        user_id=user_id,
+        from_id=from_contact_id,
+        to_id=to_contact_id,
+    )
+    return (
+        f"✅ Conexão registrada:\n"
+        f"- {from_name} → {to_name}: {from_label}\n"
+        f"- {to_name} → {from_name}: {to_label}"
+    )
+
+
+async def unlink_contacts(user_id: str, from_contact_id: str, to_contact_id: str) -> str:
+    db = get_db()
+
+    names_result = (
+        db.table("contacts")
+        .select("id, display_name")
+        .eq("user_id", user_id)
+        .in_("id", [from_contact_id, to_contact_id])
+        .execute()
+    )
+    name_map = {c["id"]: c["display_name"] for c in names_result.data}
+    from_name = name_map.get(from_contact_id, "?")
+    to_name = name_map.get(to_contact_id, "?")
+
+    for a, b in [(from_contact_id, to_contact_id), (to_contact_id, from_contact_id)]:
+        db.table("contact_relationships").delete().eq("user_id", user_id).eq(
+            "from_contact_id", a
+        ).eq("to_contact_id", b).execute()
+
+    log.info(
+        "contacts.unlinked",
+        user_id=user_id,
+        from_id=from_contact_id,
+        to_id=to_contact_id,
+    )
+    return f"Conexão entre **{from_name}** e **{to_name}** removida."

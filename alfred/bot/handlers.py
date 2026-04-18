@@ -346,8 +346,9 @@ async def _handle_nudge_callback(query: object, verb: str, nudge_id: str) -> Non
     result = await handle_nudge_action(nudge_id=nudge_id, action=verb)
 
     if verb == "copy":
-        await q.edit_message_text(
-            f"📋 Mensagem copiada para você:\n\n{result}",
+        await q.edit_message_text("📋 Mensagem copiada abaixo ⬇️")
+        await q.message.reply_text(
+            f"```\n{result}\n```",
             parse_mode="Markdown",
         )
     elif verb == "done":

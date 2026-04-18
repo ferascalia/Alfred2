@@ -241,6 +241,49 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["display_name"],
         },
     },
+    {
+        "name": "link_contacts",
+        "description": "Registra uma conexão entre dois contatos. Labels descrevem a relação do ponto de vista de cada contato.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_contact_id": {"type": "string", "description": "ID do primeiro contato"},
+                "to_contact_id": {"type": "string", "description": "ID do segundo contato"},
+                "from_label": {
+                    "type": "string",
+                    "description": "Como o primeiro contato se relaciona com o segundo. Ex: 'trabalha com Thiago no BTG'",
+                },
+                "to_label": {
+                    "type": "string",
+                    "description": "Como o segundo contato se relaciona com o primeiro. Ex: 'trabalha com Stephanie no BTG'",
+                },
+            },
+            "required": ["from_contact_id", "to_contact_id", "from_label", "to_label"],
+        },
+    },
+    {
+        "name": "unlink_contacts",
+        "description": "Remove a conexão entre dois contatos (ambas as direções).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_contact_id": {"type": "string", "description": "ID do primeiro contato"},
+                "to_contact_id": {"type": "string", "description": "ID do segundo contato"},
+            },
+            "required": ["from_contact_id", "to_contact_id"],
+        },
+    },
+    {
+        "name": "get_contact_network",
+        "description": "Mostra todas as conexões/relacionamentos de um contato.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "contact_id": {"type": "string", "description": "ID do contato"},
+            },
+            "required": ["contact_id"],
+        },
+    },
 ]
 
 
@@ -318,5 +361,17 @@ async def dispatch_tool(
     if tool_name == "create_contact_confirmed":
         from alfred.services.contacts import create_contact_confirmed
         return await create_contact_confirmed(user_id=user_id, **tool_input)
+
+    if tool_name == "link_contacts":
+        from alfred.services.contacts import link_contacts
+        return await link_contacts(user_id=user_id, **tool_input)
+
+    if tool_name == "unlink_contacts":
+        from alfred.services.contacts import unlink_contacts
+        return await unlink_contacts(user_id=user_id, **tool_input)
+
+    if tool_name == "get_contact_network":
+        from alfred.services.contacts import get_contact_network
+        return await get_contact_network(user_id=user_id, **tool_input)
 
     return f"Ferramenta '{tool_name}' não reconhecida."

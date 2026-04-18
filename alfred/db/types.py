@@ -76,3 +76,12 @@ class MessageRow(TypedDict):
     role: str
     content: Any
     created_at: str
+
+
+class ContactRelationshipRow(TypedDict):
+    id: str
+    user_id: str
+    from_contact_id: str
+    to_contact_id: str
+    label: str
+    created_at: str
