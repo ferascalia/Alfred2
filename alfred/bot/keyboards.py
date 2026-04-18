@@ -45,3 +45,31 @@ def contact_action_keyboard(contact_id: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🗑️ Descartar", callback_data=f"contact:discard:{contact_id}"),
         ]
     ])
+
+
+def import_preview_keyboard(user_id: str, has_duplicates: bool = True) -> InlineKeyboardMarkup:
+    """Grouped preview keyboard: 3 options when duplicates exist, 2 when clean."""
+    if has_duplicates:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Importar novos + Pular duplicatas", callback_data=f"import:clean_and_skip:{user_id}")],
+            [InlineKeyboardButton("📥 Importar todos como novos", callback_data=f"import:import_all:{user_id}")],
+            [InlineKeyboardButton("🔍 Revisar duplicatas um a um", callback_data=f"import:review:{user_id}")],
+        ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirmar importação", callback_data=f"import:confirm_all:{user_id}")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="import:cancel")],
+    ])
+
+
+def duplicate_review_keyboard(user_id: str, index: int) -> InlineKeyboardMarkup:
+    """4 action buttons for reviewing a single duplicate."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⏭ Pular", callback_data=f"import:dup_skip:{user_id}:{index}"),
+            InlineKeyboardButton("➕ Importar novo", callback_data=f"import:dup_new:{user_id}:{index}"),
+        ],
+        [
+            InlineKeyboardButton("🔀 Mesclar", callback_data=f"import:dup_merge:{user_id}:{index}"),
+            InlineKeyboardButton("🔄 Substituir", callback_data=f"import:dup_replace:{user_id}:{index}"),
+        ],
+    ])
