@@ -50,7 +50,7 @@ async def process_digest(user_id: str) -> dict[str, Any]:
         else:
             lines.append(f"• {name} — nunca contatado")
 
-    lines.append("\nQuer que eu rascunhe uma mensagem para algum deles? É só me dizer o nome.")
+    lines.append("\nSe desejar, posso rascunhar uma mensagem para qualquer um deles. Basta indicar o nome, senhor.")
 
     text = "\n".join(lines)
 

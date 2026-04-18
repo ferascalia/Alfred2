@@ -335,10 +335,10 @@ async def draft_message(
     memories = await search_memories(user_id=user_id, query=purpose, contact_id=contact_id, limit=5)
 
     tone_guide = {
-        "warm": "caloroso e pessoal, como uma mensagem de amigo próximo",
-        "professional": "profissional mas amigável",
-        "casual": "casual e descontraído",
-    }.get(tone, "caloroso e pessoal")
+        "warm": "elegante e atencioso, como um gentleman que se importa genuinamente",
+        "professional": "formal e polido, com cortesia britânica",
+        "casual": "descontraído mas refinado, sem perder a compostura",
+    }.get(tone, "elegante e atencioso")
 
     prompt = f"""Com base no contexto abaixo, escreva uma mensagem {tone_guide} para enviar a este contato.
 

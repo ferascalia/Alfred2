@@ -87,7 +87,7 @@ MEMÓRIAS:
 Retorne EXATAMENTE neste formato JSON (sem markdown):
 {{
   "reason": "frase curta explicando por que é hora de entrar em contato (máx 100 chars)",
-  "draft": "rascunho caloroso e pessoal da mensagem para o contato (máx 200 chars)"
+  "draft": "rascunho elegante e pessoal da mensagem para o contato, no tom de um gentleman refinado (máx 200 chars)"
 }}"""
 
     client = get_anthropic()
