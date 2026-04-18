@@ -33,12 +33,40 @@ async def list_contacts(
             )
         return "Nenhum contato encontrado." + hint
 
+    contact_ids = [c["id"] for c in result.data]
+    subordinates: dict[str, list[str]] = {}
+    if contact_ids:
+        rels = (
+            db.table("contact_relationships")
+            .select("from_contact_id, to_contact_id, label")
+            .eq("user_id", user_id)
+            .in_("from_contact_id", contact_ids)
+            .in_("to_contact_id", contact_ids)
+            .execute()
+        )
+        for r in (rels.data or []):
+            label = (r.get("label") or "").lower()
+            if "reporta" in label or "subordinad" in label or "lider" in label or "gestor" in label or "chefe" in label:
+                subordinates.setdefault(r["to_contact_id"], []).append(r["from_contact_id"])
+
+    listed: set[str] = set()
     lines = []
     for c in result.data:
+        if c["id"] in listed:
+            continue
+        listed.add(c["id"])
         last = c.get("last_interaction_at")
         last_str = f" | último contato: {last[:10]}" if last else ""
         company_str = f" | empresa: {c.get('company')}" if c.get("company") else ""
         lines.append(f"- **{c['display_name']}** (id: {c['id']}){company_str}{last_str}")
+        for sub_id in subordinates.get(c["id"], []):
+            sub = next((x for x in result.data if x["id"] == sub_id), None)
+            if sub and sub["id"] not in listed:
+                listed.add(sub["id"])
+                s_last = sub.get("last_interaction_at")
+                s_last_str = f" | último contato: {s_last[:10]}" if s_last else ""
+                s_company_str = f" | empresa: {sub.get('company')}" if sub.get("company") else ""
+                lines.append(f"   ↳ **{sub['display_name']}** (id: {sub['id']}){s_company_str}{s_last_str}")
 
     # Hint para contatos existentes: lembrar de executar ações encadeadas
     if search and result.data:
@@ -387,7 +415,7 @@ async def get_contact_network(user_id: str, contact_id: str) -> str:
     lines = []
     for r in rels.data:
         name = name_map.get(r["to_contact_id"], "?")
-        lines.append(f"- {name}: {r['label']}")
+        lines.append(f"  ↳ {name} — {r['label']}")
     return "\n".join(lines)
 
 
