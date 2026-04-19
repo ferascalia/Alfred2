@@ -188,9 +188,11 @@ async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     from alfred.services.import_contacts import build_template_csv
 
     csv_bytes = build_template_csv()
+    buf = io.BytesIO(csv_bytes)
+    buf.name = "template_alfred.csv"
 
     await update.message.reply_document(
-        document=io.BytesIO(csv_bytes),
+        document=buf,
         filename="template_alfred.csv",
         caption=(
             "📥 *Como importar contatos em massa:*\n\n"
