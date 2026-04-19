@@ -1,4 +1,5 @@
 """Agent loop with tool use."""
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -390,6 +391,31 @@ async def _get_or_create_user(telegram_id: int, user_name: str) -> str:
     return result.data[0]["id"]
 
 
+_PARTIAL_REPORT_LABELS: dict[str, str] = {
+    "create_contact": "Contato criado: {display_name}",
+    "create_contact_confirmed": "Contato criado: {display_name}",
+    "add_memory": "Memória salva",
+    "update_contact": "Contato atualizado",
+    "log_interaction": "Interação registrada",
+    "set_follow_up": "Follow-up agendado",
+    "set_cadence": "Cadência atualizada",
+    "archive_contact": "Contato arquivado",
+}
+
+
+def _build_partial_report(tool_calls_log: list[tuple[str, dict]]) -> str:
+    lines: list[str] = []
+    for name, args in tool_calls_log:
+        template = _PARTIAL_REPORT_LABELS.get(name)
+        if template:
+            try:
+                label = template.format_map(args)
+            except KeyError:
+                label = template.split(":")[0]
+            lines.append(f"✅ {label}")
+    return "\n".join(lines) if lines else "Nenhuma ação foi completada."
+
+
 async def _load_history(user_id: str, limit: int = 20) -> list[MessageParam]:
     """Load recent conversation messages from DB."""
     db = get_db()
@@ -482,9 +508,10 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     # Quando True, força tool_choice=any no próximo round para quebrar
     # alucinações em que Claude insiste em emitir texto sem chamar ferramentas
     force_tool_use_next_round = False
+    rate_limit_retries = 0
 
     # Agentic loop — keep going until we get a stop_turn with no tool calls
-    for _turn in range(10):  # max 10 tool rounds
+    for _turn in range(15):  # max 15 tool rounds
         try:
             create_kwargs: dict = {
                 "model": MODEL,
@@ -504,8 +531,19 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 force_tool_use_next_round = False
             response = await client.messages.create(**create_kwargs)
         except RateLimitError:
-            log.warning("anthropic.rate_limit")
-            return "Estou sobrecarregado no momento, tente em alguns minutos. 🔄"
+            if rate_limit_retries < 2:
+                rate_limit_retries += 1
+                log.warning("anthropic.rate_limit_retry", attempt=rate_limit_retries)
+                await asyncio.sleep(5 * rate_limit_retries)
+                continue
+            log.warning("anthropic.rate_limit_exhausted")
+            if tool_calls_log:
+                partial = _build_partial_report(tool_calls_log)
+                return (
+                    "Estou com limitação de taxa. O que já foi feito:\n"
+                    f"{partial}\n\n"
+                    "Tente novamente em alguns minutos para completar o restante. 🔄"
+                )
         except APIStatusError as exc:
             log.error("anthropic.api_error", status=exc.status_code)
             if exc.status_code == 402:
