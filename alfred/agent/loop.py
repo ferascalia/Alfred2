@@ -53,19 +53,17 @@ _CADENCE_PATTERNS = [
 
 
 # Fallback patterns para intenção de follow-up que o dateparser NÃO cobre em pt-BR.
-# Quando algum desses dispara e o dateparser não extraiu nada, forçamos set_follow_up
-# mas sem data pré-calculada — o Claude precisa resolver.
+# Cada pattern exige verbo de ação para evitar falsos positivos em consultas
+# (ex: "mostra os follow-ups da próxima semana" NÃO deve triggar).
+_ACTION_VERBS = r"(marca|agenda|programa|reagenda|coloca|bota|põe|salva)"
 _FOLLOWUP_FALLBACK_PATTERNS = [
-    r"\bme\s+lembr(a|e|ar)\b",
-    r"\bfollow[\s-]?up\b",
-    r"\bdia\s+\d{1,2}\b",                        # "dia 20"
-    r"\bsemana\s+que\s+vem\b",
-    r"\bm(ê|e)s\s+que\s+vem\b",
-    r"\bano\s+que\s+vem\b",
-    r"\bdaqui\s+a\s+(uma|duas|tr(ê|e)s|quatro|cinco|seis)\s+(dias?|semanas?|meses|m(ê|e)s)\b",
-    r"\bem\s+(uma|duas|tr(ê|e)s|quatro|cinco|seis)\s+(dias?|semanas?|meses|m(ê|e)s)\b",
-    r"\bpr(ó|o)xim(a|o)\s+(semana|m(ê|e)s|ano)\b",
-    r"\bdepois\s+de\s+amanh(ã|a)\b",
+    r"\bme\s+lembr(a|e|ar)\s+d[eao]\b",
+    rf"\b{_ACTION_VERBS}\b.{{0,40}}\bfollow[\s-]?up\b",
+    rf"\b{_ACTION_VERBS}\b.{{0,40}}\bdia\s+\d{{1,2}}\b",
+    rf"\b{_ACTION_VERBS}\b.{{0,40}}\b(semana|m(ê|e)s|ano)\s+que\s+vem\b",
+    rf"\b{_ACTION_VERBS}\b.{{0,40}}\bpr(ó|o)xim(a|o)\s+(semana|m(ê|e)s|ano)\b",
+    r"\bdaqui\s+a\s+(uma|duas|tr(ê|e)s|quatro|cinco|seis|\d+)\s+(dias?|semanas?|meses|m(ê|e)s)\b",
+    rf"\b{_ACTION_VERBS}\b.{{0,30}}\bdepois\s+de\s+amanh(ã|a)\b",
 ]
 
 _BRT = timezone(timedelta(hours=-3))
@@ -756,4 +754,13 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
         messages.append({"role": "assistant", "content": response.content})  # type: ignore[typeddict-item]
         messages.append({"role": "user", "content": tool_results})  # type: ignore[typeddict-item]
 
-    return "Não consegui completar a solicitação. Por favor, tente novamente."
+    if tool_calls_log:
+        partial = _build_partial_report(tool_calls_log)
+        fallback = (
+            f"Consegui fazer parte do que você pediu:\n{partial}\n\n"
+            "A mensagem era longa — pode repetir o que ficou faltando? 🙏"
+        )
+    else:
+        fallback = "Não consegui completar a solicitação. Pode tentar de novo com menos itens? 🙏"
+    await _save_message(user_id, "assistant", fallback)
+    return fallback
