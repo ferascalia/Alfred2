@@ -8,9 +8,11 @@ from anthropic import APIConnectionError, APIStatusError, RateLimitError
 from anthropic.types import MessageParam, TextBlock, ToolResultBlockParam, ToolUseBlock
 from dateparser.search import search_dates
 
+from alfred.agent.classifier import classify_intent
 from alfred.agent.client import MAX_TOKENS, MODEL, get_anthropic
-from alfred.agent.prompts import SYSTEM_PROMPT
-from alfred.agent.tools import TOOL_SCHEMAS, dispatch_tool
+from alfred.agent.prompt_sections import build_system_prompt
+from alfred.agent.prompts import SYSTEM_PROMPT  # noqa: F401 — kept as fallback reference
+from alfred.agent.tools import TOOL_SCHEMAS, dispatch_tool, get_tools_for_intent
 from alfred.db.client import get_db
 
 log = structlog.get_logger()
@@ -490,8 +492,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     from datetime import datetime, timezone, timedelta
     brt = timezone(timedelta(hours=-3))
     now = datetime.now(brt)
-    current_date_str = now.strftime("%Y-%m-%d (%A, %H:%M BRT)")  # ex: "2026-04-12 (Sunday, 08:30 BRT)"
-    system_prompt = SYSTEM_PROMPT + f"\n\n## Data e hora atual\nHoje é {current_date_str}. Use sempre esta data/hora como referência ao registrar interações (happened_at) ou calcular follow-ups. Nunca use datas do passado para happened_at — use a data de hoje salvo o usuário dizer explicitamente outra."
+    current_date_str = now.strftime("%Y-%m-%d (%A, %H:%M BRT)")
 
     user_id = await _get_or_create_user(telegram_id, user_name)
     history = await _load_history(user_id)
@@ -503,11 +504,23 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     client = get_anthropic()
     messages = list(history)
 
-    # Pula guardrail de pending_actions quando o turno é resposta a uma confirmação
-    # (botão ✅ envia "[CONFIRMAÇÃO APROVADA]" ou último assistant msg era "Confirmando:")
-    skip_pending_guardrail = message.startswith(_CONFIRMATION_APPROVED)
+    # Classify intent (skip for confirmation responses)
+    is_confirmation = message.startswith(_CONFIRMATION_APPROVED)
+    if is_confirmation:
+        intent_name = "ACTION"
+    else:
+        intent_result = await classify_intent(message)
+        intent_name = intent_result.intent
+        log.info("agent.intent", intent=intent_name, confidence=intent_result.confidence)
+
+    # Build scoped prompt and tools
+    system_prompt = build_system_prompt(intent_name, current_date_str)
+    tools = get_tools_for_intent(intent_name)
+
+    # Guardrail routing by intent
+    skip_pending_guardrail = is_confirmation or intent_name in ("QUERY", "CONVERSATION")
     if not skip_pending_guardrail:
-        for m in reversed(history[:-1]):  # exclui a msg atual que acabamos de appendar
+        for m in reversed(history[:-1]):
             if m.get("role") == "assistant" and isinstance(m.get("content"), str):
                 skip_pending_guardrail = _is_date_confirmation_prompt(m["content"])
                 break
@@ -537,9 +550,11 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                "tools": TOOL_SCHEMAS,
                 "messages": messages,
             }
+            active_tools = tools or TOOL_SCHEMAS
+            if active_tools:
+                create_kwargs["tools"] = active_tools
             if force_tool_use_next_round:
                 create_kwargs["tool_choice"] = {"type": "any"}
                 force_tool_use_next_round = False

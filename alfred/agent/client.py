@@ -17,3 +17,5 @@ def get_anthropic() -> anthropic.AsyncAnthropic:
 
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 4096
+CLASSIFIER_MODEL = "claude-haiku-4-5-20251001"
+CLASSIFIER_MAX_TOKENS = 60

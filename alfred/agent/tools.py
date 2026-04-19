@@ -287,6 +287,34 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+_READ_TOOLS = {
+    "search_memories", "list_contacts", "get_contact_digest",
+    "draft_message", "list_follow_ups", "get_contact_network",
+}
+
+_WRITE_TOOLS = {
+    "create_contact", "update_contact", "add_memory",
+    "log_interaction", "set_cadence", "archive_contact",
+    "merge_contacts", "set_follow_up", "create_contact_confirmed",
+    "link_contacts", "unlink_contacts",
+}
+
+_INTENT_TOOLS: dict[str, set[str]] = {
+    "QUERY": _READ_TOOLS,
+    "ACTION": _READ_TOOLS | _WRITE_TOOLS,
+    "MULTI_ACTION": _READ_TOOLS | _WRITE_TOOLS,
+    "CONVERSATION": set(),
+}
+
+
+def get_tools_for_intent(intent: str) -> list[dict[str, Any]]:
+    """Return TOOL_SCHEMAS filtered by classified intent."""
+    allowed = _INTENT_TOOLS.get(intent, _READ_TOOLS | _WRITE_TOOLS)
+    if not allowed:
+        return []
+    return [s for s in TOOL_SCHEMAS if s["name"] in allowed]
+
+
 async def dispatch_tool(
     tool_name: str,
     tool_input: dict[str, Any],
