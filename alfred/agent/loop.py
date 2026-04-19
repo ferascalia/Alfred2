@@ -127,10 +127,22 @@ def _detect_future_dates(user_message: str) -> list[tuple[str, datetime]]:
     return [(snippet, dt) for (snippet, dt) in hits if dt.date() > today]
 
 
+_QUERY_PATTERNS = [
+    r"\bmostr(a|e|ar)\b",
+    r"\blist(a|e|ar)\b",
+    r"\bquais\b",
+    r"\bquantos?\b",
+    r"\bver\s+(os?|as?|meus?|minhas?)\b",
+    r"\bme\s+mostr(a|e)\b",
+]
+
+
 def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[str]:
     """Retorna lista de lembretes para ferramentas esperadas mas não chamadas."""
     msg = user_message.lower()
     missing: list[str] = []
+
+    is_query = any(re.search(p, msg) for p in _QUERY_PATTERNS)
 
     has_interaction = any(re.search(p, msg) for p in _INTERACTION_PATTERNS)
     has_cadence = any(re.search(p, msg) for p in _CADENCE_PATTERNS)
@@ -145,12 +157,16 @@ def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[s
         )
 
     # Cadência tem prioridade sobre follow-up pontual
-    scheduled = "set_follow_up" in tools_called or "set_cadence" in tools_called
-    if has_cadence and not scheduled:
+    scheduled = (
+        "set_follow_up" in tools_called
+        or "set_cadence" in tools_called
+        or "list_follow_ups" in tools_called
+    )
+    if has_cadence and not scheduled and not is_query:
         missing.append(
             "• `set_cadence` — você pediu cadência recorrente mas não configurou."
         )
-    elif has_followup and not scheduled:
+    elif has_followup and not scheduled and not is_query:
         if future_dates:
             snippet, dt = future_dates[0]
             date_iso = dt.date().isoformat()
