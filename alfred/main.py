@@ -90,3 +90,15 @@ async def jobs_digest(request: Request) -> dict[str, object]:
     from alfred.jobs.digest import process_digest
     result = await process_digest(user_id=user_id)
     return result
+
+
+@app.get("/admin/usage", dependencies=[Depends(_check_jobs_secret)])
+async def admin_usage() -> dict[str, object]:
+    from alfred.services.usage import get_monthly_spend
+    spent = await get_monthly_spend()
+    budget = settings.anthropic_monthly_budget_usd
+    return {
+        "month_spend_usd": round(spent, 4),
+        "budget_usd": budget,
+        "percent_used": round((spent / budget) * 100, 1) if budget > 0 else 0,
+    }

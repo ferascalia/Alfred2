@@ -14,6 +14,8 @@ from alfred.agent.prompt_sections import build_system_prompt
 from alfred.agent.prompts import SYSTEM_PROMPT  # noqa: F401 — kept as fallback reference
 from alfred.agent.tools import TOOL_SCHEMAS, dispatch_tool, get_tools_for_intent
 from alfred.db.client import get_db
+from alfred.services.alerts import alert_admin
+from alfred.services.usage import record_usage
 
 log = structlog.get_logger()
 
@@ -576,11 +578,12 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
         except APIStatusError as exc:
             log.error("anthropic.api_error", status=exc.status_code)
             if exc.status_code == 402:
-                await _alert_owner(
-                    telegram_id,
-                    "⚠️ *Alerta Alfred*: Créditos da Anthropic esgotados. O assistente está fora do ar até você recarregar em https://console.anthropic.com.",
+                await alert_admin(
+                    "❌ *Créditos Anthropic ESGOTADOS*\n\n"
+                    "O Alfred parou de responder.\n"
+                    "Recarregue: console.anthropic.com"
                 )
-                return "Meus créditos acabaram. Já te avisei por aqui — recarrega lá no console da Anthropic para eu voltar. 💳"
+                return "Estou temporariamente fora do ar. O administrador já foi notificado. 🔧"
             return "Ocorreu um erro no servidor, tente novamente. 🛠️"
         except APIConnectionError:
             log.error("anthropic.connection_error")
@@ -590,6 +593,16 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
             "agent.response",
             stop_reason=response.stop_reason,
             usage=response.usage.model_dump(),
+        )
+
+        usage = response.usage
+        await record_usage(
+            model=MODEL,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cache_write_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            user_id=user_id,
         )
 
         # Collect tool calls from this response

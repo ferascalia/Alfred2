@@ -7,6 +7,7 @@ from typing import Literal
 import structlog
 
 from alfred.agent.client import CLASSIFIER_MAX_TOKENS, CLASSIFIER_MODEL, get_anthropic
+from alfred.services.usage import record_usage
 
 log = structlog.get_logger()
 
@@ -53,6 +54,15 @@ async def classify_intent(message: str) -> IntentResult:
             max_tokens=CLASSIFIER_MAX_TOKENS,
             system=_CLASSIFIER_PROMPT,
             messages=[{"role": "user", "content": message}],
+        )
+
+        usage = response.usage
+        await record_usage(
+            model=CLASSIFIER_MODEL,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cache_write_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
         )
 
         raw = response.content[0].text.strip()

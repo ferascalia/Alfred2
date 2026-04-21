@@ -12,8 +12,14 @@ def _mock_response(intent: str, confidence: float = 0.95):
     """Create a mock Anthropic response with JSON content."""
     text_block = MagicMock()
     text_block.text = json.dumps({"intent": intent, "confidence": confidence})
+    usage = MagicMock()
+    usage.input_tokens = 100
+    usage.output_tokens = 20
+    usage.cache_read_input_tokens = 0
+    usage.cache_creation_input_tokens = 0
     response = MagicMock()
     response.content = [text_block]
+    response.usage = usage
     return response
 
 
@@ -52,7 +58,8 @@ class TestClassifyIntent:
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=_mock_response(expected))
 
-        with patch("alfred.agent.classifier.get_anthropic", return_value=mock_client):
+        with patch("alfred.agent.classifier.get_anthropic", return_value=mock_client), \
+             patch("alfred.agent.classifier.record_usage", new_callable=AsyncMock):
             result = await classify_intent(msg)
             assert result.intent == expected
             assert result.confidence > 0
@@ -71,13 +78,20 @@ class TestClassifyIntent:
     async def test_fallback_on_invalid_json(self):
         text_block = MagicMock()
         text_block.text = "not json at all"
+        usage = MagicMock()
+        usage.input_tokens = 100
+        usage.output_tokens = 20
+        usage.cache_read_input_tokens = 0
+        usage.cache_creation_input_tokens = 0
         response = MagicMock()
         response.content = [text_block]
+        response.usage = usage
 
         mock_client = AsyncMock()
         mock_client.messages.create = AsyncMock(return_value=response)
 
-        with patch("alfred.agent.classifier.get_anthropic", return_value=mock_client):
+        with patch("alfred.agent.classifier.get_anthropic", return_value=mock_client), \
+             patch("alfred.agent.classifier.record_usage", new_callable=AsyncMock):
             result = await classify_intent("teste")
             assert result.intent == "ACTION"
 
@@ -88,7 +102,8 @@ class TestClassifyIntent:
             return_value=_mock_response("UNKNOWN_INTENT")
         )
 
-        with patch("alfred.agent.classifier.get_anthropic", return_value=mock_client):
+        with patch("alfred.agent.classifier.get_anthropic", return_value=mock_client), \
+             patch("alfred.agent.classifier.record_usage", new_callable=AsyncMock):
             result = await classify_intent("teste")
             assert result.intent == "ACTION"
 

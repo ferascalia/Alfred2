@@ -32,5 +32,9 @@ class Settings(BaseSettings):
     # Railway
     railway_api_token: str = ""
 
+    # Admin alerts
+    admin_telegram_id: int = 0
+    anthropic_monthly_budget_usd: float = 5.0
+
 
 settings = Settings()  # type: ignore[call-arg]
