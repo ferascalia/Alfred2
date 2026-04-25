@@ -36,9 +36,6 @@ class Settings(BaseSettings):
     admin_telegram_id: int = 0
     anthropic_monthly_budget_usd: float = 5.0
 
-    # Feature flags
-    use_multi_agent: bool = False
-    multi_agent_test_ids: str = ""
 
 
 settings = Settings()  # type: ignore[call-arg]

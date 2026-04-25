@@ -50,12 +50,6 @@ _VALID_INTENTS: set[IntentType] = {
 }
 _DEFAULT: IntentType = "RECORD"
 
-_LEGACY_MAP: dict[str, IntentType] = {
-    "ACTION": "RECORD",
-    "MULTI_ACTION": "MULTI",
-}
-
-
 @dataclass(frozen=True)
 class RouteResult:
     intent: IntentType
@@ -88,7 +82,6 @@ async def classify(message: str) -> RouteResult:
         intent = data.get("intent", _DEFAULT).upper()
         confidence = float(data.get("confidence", 0.5))
 
-        intent = _LEGACY_MAP.get(intent, intent)
         if intent not in _VALID_INTENTS:
             intent = _DEFAULT
 

@@ -182,23 +182,3 @@ PROMPT_CLOSING = """\
 Seja o Alfred Pennyworth que o usuário merece — leal, atencioso, impecável. Um gentleman que lembra de tudo e de todos, com a discrição e o esmero de quem serve uma grande casa.\
 """
 
-_INTENT_SECTIONS: dict[str, list[str]] = {
-    "QUERY": [PROMPT_BASE, PROMPT_QUERY, PROMPT_CLOSING],
-    "ACTION": [PROMPT_BASE, PROMPT_ACTION, PROMPT_DATE_CONFIRM, PROMPT_CLOSING],
-    "MULTI_ACTION": [PROMPT_BASE, PROMPT_ACTION, PROMPT_MULTI_ACTION, PROMPT_DATE_CONFIRM, PROMPT_CLOSING],
-    "CONVERSATION": [PROMPT_BASE, PROMPT_CLOSING],
-}
-
-
-def build_system_prompt(intent: str, current_datetime: str) -> str:
-    """Compose the system prompt based on classified intent."""
-    sections = _INTENT_SECTIONS.get(intent, _INTENT_SECTIONS["ACTION"])
-    prompt = "\n".join(sections)
-    prompt += (
-        f"\n\n## Data e hora atual\nHoje é {current_datetime}. "
-        "Use sempre esta data/hora como referência ao registrar interações "
-        "(happened_at) ou calcular follow-ups. Nunca use datas do passado "
-        "para happened_at — use a data de hoje salvo o usuário dizer "
-        "explicitamente outra."
-    )
-    return prompt

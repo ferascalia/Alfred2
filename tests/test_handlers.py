@@ -50,7 +50,7 @@ async def test_message_handler_calls_agent() -> None:
     context.bot = MagicMock()
     context.bot.send_chat_action = AsyncMock()
 
-    with patch("alfred.agent.loop.run_agent", AsyncMock(return_value="Entendido! Criando contato.")):
+    with patch("alfred.agent.orchestrator.run_agent", AsyncMock(return_value="Entendido! Criando contato.")):
         await message_handler(update, context)
 
     update.message.reply_text.assert_called_once()
