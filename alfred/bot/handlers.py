@@ -94,16 +94,36 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+def _use_multi_agent(telegram_id: int) -> bool:
+    """Check if this user should use multi-agent orchestrator."""
+    from alfred.config import settings
+    if settings.use_multi_agent:
+        return True
+    if settings.multi_agent_test_ids:
+        test_ids = {int(x.strip()) for x in settings.multi_agent_test_ids.split(",") if x.strip()}
+        return telegram_id in test_ids
+    return False
+
+
+def _get_run_agent(telegram_id: int):
+    """Return the appropriate run_agent based on feature flag and user."""
+    if _use_multi_agent(telegram_id):
+        from alfred.agent.orchestrator import run_agent
+    else:
+        from alfred.agent.loop import run_agent
+    return run_agent
+
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message or not update.message.text:
         return
 
-    from alfred.agent.loop import run_agent
-
     tg_user = update.effective_user
     text = update.message.text
+    run_agent = _get_run_agent(tg_user.id)
 
-    log.info("message.received", telegram_id=tg_user.id, length=len(text))
+    log.info("message.received", telegram_id=tg_user.id, length=len(text),
+             multi_agent=_use_multi_agent(tg_user.id))
 
     chat_id = update.effective_chat.id  # type: ignore[union-attr]
 
@@ -122,6 +142,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             user_name=tg_user.full_name,
             message=text,
         )
+    except Exception:
+        log.exception("message_handler.agent_error", telegram_id=tg_user.id)
+        response = "Desculpe, tive um problema técnico. Pode tentar de novo? 🙏"
     finally:
         typing_task.cancel()
         await asyncio.sleep(0)
@@ -139,10 +162,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not voice:
         return
 
-    from alfred.agent.loop import run_agent
     from alfred.bot.voice import transcribe_voice
 
     tg_user = update.effective_user
+    run_agent = _get_run_agent(tg_user.id)
     chat_id = update.effective_chat.id  # type: ignore[union-attr]
 
     log.info("voice.received", telegram_id=tg_user.id, duration=getattr(voice, "duration", 0))
@@ -303,8 +326,6 @@ async def _handle_date_confirm_callback(
     """Handle dateconfirm:yes:{id} and dateconfirm:edit:{id} callbacks."""
     from telegram import CallbackQuery
 
-    from alfred.agent.loop import run_agent
-
     q: CallbackQuery = query  # type: ignore[assignment]
     parts = data.split(":", 2)
     if len(parts) < 3:
@@ -320,6 +341,8 @@ async def _handle_date_confirm_callback(
             "⏳ Essa confirmação expirou. Me diga de novo o que quer registrar."
         )
         return
+
+    run_agent = _get_run_agent(pending["telegram_id"])
 
     if verb == "yes":
         # Remove botões e mostra que foi confirmado

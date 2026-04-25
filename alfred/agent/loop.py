@@ -1,507 +1,50 @@
 """Agent loop with tool use."""
 import asyncio
-import re
-from datetime import datetime, timedelta, timezone
 
 import structlog
 from anthropic import APIConnectionError, APIStatusError, RateLimitError
-from anthropic.types import MessageParam, TextBlock, ToolResultBlockParam, ToolUseBlock
-from dateparser.search import search_dates
+from anthropic.types import TextBlock, ToolResultBlockParam, ToolUseBlock
 
 from alfred.agent.classifier import classify_intent
 from alfred.agent.client import MAX_TOKENS, MODEL, get_anthropic
+from alfred.agent.guardrails.date_confirmation import (
+    CONFIRMATION_APPROVED,
+    is_date_confirmation_prompt,
+)
+from alfred.agent.guardrails.pending_actions import detect_pending_actions
+from alfred.agent.guardrails.truthfulness import validate_response_truthfulness
+from alfred.agent.history import (
+    alert_owner,
+    build_partial_report,
+    get_or_create_user,
+    load_history,
+    save_message,
+)
 from alfred.agent.prompt_sections import build_system_prompt
 from alfred.agent.prompts import SYSTEM_PROMPT  # noqa: F401 — kept as fallback reference
+from alfred.agent.recovery import handle_tool_error
 from alfred.agent.tools import TOOL_SCHEMAS, dispatch_tool, get_tools_for_intent
-from alfred.db.client import get_db
 from alfred.services.alerts import alert_admin
 from alfred.services.usage import record_usage
 
 log = structlog.get_logger()
 
-
-# ───────────────────────────────────────────────────────────────
-# Guardrail determinístico — detecta ações pendentes não executadas
-# ───────────────────────────────────────────────────────────────
-
-# Verbos que indicam que o usuário falou/encontrou/interagiu com alguém
-_INTERACTION_PATTERNS = [
-    r"\bfalei\b", r"\bfalamos\b", r"\bconvers(ei|amos|ando)\b",
-    r"\bencontr(ei|amos|ou)\b", r"\bligu(ei|ou)\b", r"\balmo(c|ç)(ei|amos)\b",
-    r"\bjant(ei|amos)\b", r"\bvi\s+(o|a|ele|ela)\b", r"\breun(i|imos)\b",
-    r"\bmandou\b", r"\bmandei\b", r"\bme\s+ligou\b", r"\bme\s+chamou\b",
-    # Reunião no passado
-    r"\btive\s+(uma\s+)?reuni(ã|a)o\b", r"\bteve\s+(uma\s+)?reuni(ã|a)o\b",
-    r"\bacabei\s+de\s+(falar|conversar|sair)\b",
-    r"\b(tava|estava)\s+(conversando|falando)\b",
-    # Mensagens trocadas
-    r"\bme\s+respondeu\b",
-    r"\bme\s+passou\s+(mensagem|recado|(á|a)udio)\b",
-    r"\bmandou\s+(mensagem|(á|a)udio|recado)\b",
-    r"\bmandei\s+(mensagem|(á|a)udio|recado)\b",
-    # Encontros presenciais
-    r"\btomei\s+(um\s+)?(caf(é|e)|drink)\s+com\b",
-    r"\bcaf(é|e)\s+com\b",
-    r"\bpassei\s+(no|na|pelo|pela)\b",
-]
-
-# Patterns para cadência recorrente
-_CADENCE_PATTERNS = [
-    r"\btoda\s+(segunda|ter(ç|c)a|quarta|quinta|sexta|s(á|a)bado|domingo)",
-    r"\ba\s+cada\s+\d+\s+dias?\b", r"\bde\s+\d+\s+em\s+\d+\s+dias?\b",
-    r"\bsemanalmente\b", r"\bmensalmente\b",
-    r"\btoda\s+(semana|quinzena|m(ê|e)s)\b",
-    r"\bquinzenalmente\b",
-    r"\b(uma|duas|tr(ê|e)s)\s+vezes\s+por\s+(semana|m(ê|e)s)\b",
-]
-
-
-# Fallback patterns para intenção de follow-up que o dateparser NÃO cobre em pt-BR.
-# Cada pattern exige verbo de ação para evitar falsos positivos em consultas
-# (ex: "mostra os follow-ups da próxima semana" NÃO deve triggar).
-_ACTION_VERBS = r"(marca|agenda|programa|reagenda|coloca|bota|põe|salva)"
-_FOLLOWUP_FALLBACK_PATTERNS = [
-    r"\bme\s+lembr(a|e|ar)\s+d[eao]\b",
-    rf"\b{_ACTION_VERBS}\b.{{0,40}}\bfollow[\s-]?up\b",
-    rf"\b{_ACTION_VERBS}\b.{{0,40}}\bdia\s+\d{{1,2}}\b",
-    rf"\b{_ACTION_VERBS}\b.{{0,40}}\b(semana|m(ê|e)s|ano)\s+que\s+vem\b",
-    rf"\b{_ACTION_VERBS}\b.{{0,40}}\bpr(ó|o)xim(a|o)\s+(semana|m(ê|e)s|ano)\b",
-    r"\bdaqui\s+a\s+(uma|duas|tr(ê|e)s|quatro|cinco|seis|\d+)\s+(dias?|semanas?|meses|m(ê|e)s)\b",
-    rf"\b{_ACTION_VERBS}\b.{{0,30}}\bdepois\s+de\s+amanh(ã|a)\b",
-]
-
-_BRT = timezone(timedelta(hours=-3))
-
-# ───────────────────────────────────────────────────────────────
-# Date-confirmation prompt detector
-# Claude é instruído no system prompt a iniciar qualquer proposta de data
-# com a palavra literal "Confirmando:" seguida de pelo menos uma data numérica.
-# Quando o turno termina assim, pulamos ambos guardrails (pending-actions e
-# veracidade) porque a pausa é legítima — não é alucinação.
-# ───────────────────────────────────────────────────────────────
-_DATE_CONFIRM_PREFIX = re.compile(r"^\s*confirmando\s*:", re.IGNORECASE)
-_CONFIRMATION_APPROVED = "[CONFIRMAÇÃO APROVADA]"
-_DATE_NUMERIC = re.compile(
-    r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b"
-)
-
-
-def _is_date_confirmation_prompt(response_text: str) -> bool:
-    """True quando Claude está propondo uma data para confirmação do usuário.
-
-    Requer DOIS sinais determinísticos simultâneos:
-    - Prefixo literal "Confirmando:" no início de qualquer linha/parágrafo
-      (Claude pode criar contatos primeiro e só depois propor a confirmação)
-    - Pelo menos uma data numérica (DD/MM, DD/MM/AAAA ou YYYY-MM-DD) no corpo
-    """
-    if not response_text:
-        return False
-    # Checa se alguma linha começa com "Confirmando:"
-    has_prefix = any(
-        _DATE_CONFIRM_PREFIX.match(line)
-        for line in response_text.split("\n")
-    )
-    if not has_prefix:
-        return False
-    if not _DATE_NUMERIC.search(response_text):
-        return False
-    return True
-
-
-def _detect_future_dates(user_message: str) -> list[tuple[str, datetime]]:
-    """Usa dateparser para extrair datas futuras da mensagem. 100% determinístico."""
-    now = datetime.now(_BRT)
-    try:
-        hits = search_dates(
-            user_message,
-            languages=["pt"],
-            settings={
-                "PREFER_DATES_FROM": "future",
-                "RELATIVE_BASE": now.replace(tzinfo=None),
-                "RETURN_AS_TIMEZONE_AWARE": False,
-            },
-        ) or []
-    except Exception:
-        log.exception("dateparser.search_dates_failed", message=user_message)
-        return []
-
-    today = now.date()
-    return [(snippet, dt) for (snippet, dt) in hits if dt.date() > today]
-
-
-_QUERY_PATTERNS = [
-    r"\bmostr(a|e|ar)\b",
-    r"\blist(a|e|ar)\b",
-    r"\bquais\b",
-    r"\bquantos?\b",
-    r"\bver\s+(os?|as?|meus?|minhas?)\b",
-    r"\bme\s+mostr(a|e)\b",
-]
-
-
-def _detect_pending_actions(user_message: str, tools_called: set[str]) -> list[str]:
-    """Retorna lista de lembretes para ferramentas esperadas mas não chamadas."""
-    msg = user_message.lower()
-    missing: list[str] = []
-
-    is_query = any(re.search(p, msg) for p in _QUERY_PATTERNS)
-
-    has_interaction = any(re.search(p, msg) for p in _INTERACTION_PATTERNS)
-    has_cadence = any(re.search(p, msg) for p in _CADENCE_PATTERNS)
-    future_dates = _detect_future_dates(user_message)
-    has_followup_fallback = any(re.search(p, msg) for p in _FOLLOWUP_FALLBACK_PATTERNS)
-    has_followup = bool(future_dates) or has_followup_fallback
-
-    if has_interaction and "log_interaction" not in tools_called:
-        missing.append(
-            "• `log_interaction` — você mencionou ter falado/encontrado/conversado com a pessoa, "
-            "mas não registrou a interação."
-        )
-
-    # Cadência tem prioridade sobre follow-up pontual
-    scheduled = (
-        "set_follow_up" in tools_called
-        or "set_cadence" in tools_called
-        or "list_follow_ups" in tools_called
-    )
-    if has_cadence and not scheduled and not is_query:
-        missing.append(
-            "• `set_cadence` — você pediu cadência recorrente mas não configurou."
-        )
-    elif has_followup and not scheduled and not is_query:
-        if future_dates:
-            snippet, dt = future_dates[0]
-            date_iso = dt.date().isoformat()
-            missing.append(
-                f"• `set_follow_up` — você mencionou '{snippet.strip()}' "
-                f"(interpretado como {date_iso}) mas não agendou. "
-                f"Chame set_follow_up com date='{date_iso}'."
-            )
-        else:
-            missing.append(
-                "• `set_follow_up` — você mencionou um prazo, data futura ou 'me lembra' "
-                "mas não agendou o follow-up. Calcule a data absoluta (YYYY-MM-DD) a partir de hoje."
-            )
-
-    return missing
-
-
-# ───────────────────────────────────────────────────────────────
-# Validador de veracidade da RESPOSTA — cruza com fonte confiável (DB)
-# ───────────────────────────────────────────────────────────────
-
-# Se Claude usa essas frases, ele está afirmando ter executado a tool correspondente.
-# Se a tool não foi chamada neste turno, é alucinação.
-_CLAIM_PATTERNS: dict[str, list[str]] = {
-    "create_contact": [
-        r"\b(cadastrei|criei|adicionei|registrei)\s+(o\s+|a\s+)?(contato|pessoa)\b",
-        r"\bcontato\s+(criado|cadastrado|adicionado)\b",
-        r"\bj(á|a)\s+(est(á|a)|foi)\s+(cadastrad[oa]|adicionad[oa]|criad[oa])\b",
-        r"\badicionei\s+(à|a)\s+(sua\s+)?(lista|base)\b",
-    ],
-    "log_interaction": [
-        r"\b(registrei|anotei|salvei|gravei)\s+(a\s+)?(intera(ç|c)(ã|a)o|conversa|encontro|reuni(ã|a)o)\b",
-        r"\bintera(ç|c)(ã|a)o\s+(registrada|gravada|anotada)\b",
-    ],
-    "set_follow_up": [
-        r"\b(marquei|agendei|programei|criei)\s+(o\s+|um\s+)?follow[\s-]?up\b",
-        r"\bfollow[\s-]?up\s+(marcad[oa]|agendad[oa]|criad[oa])\b",
-        r"\blembrete\s+(criad[oa]|marcad[oa]|agendad[oa])\b",
-        r"\bte\s+(lembro|lembrarei|aviso|avisarei)\s+(em|no\s+dia|na\s+|amanh(ã|a)|quando)",
-    ],
-    "set_cadence": [
-        r"\bcad(ê|e)ncia\s+(definida|configurada|criada|atualizada)\b",
-        r"\bvou\s+(te\s+)?lembrar\s+tod[oa]s?\s+",
-    ],
-    "add_memory": [
-        r"\b(adicionei|salvei|registrei|anotei)\s+(a\s+|uma\s+|essa\s+|esta\s+)?mem(ó|o)ria\b",
-        r"\bmem(ó|o)ria\s+(adicionada|salva|registrada|gravada)\b",
-    ],
-    "list_follow_ups": [
-        r"\bseus\s+follow[\s-]?ups?\s+(marcad[oa]s?|agendad[oa]s?|s(ã|a)o)\b",
-        r"\bfollow[\s-]?ups?\s+(marcad[oa]s?|agendad[oa]s?)\s+para\b",
-        r"\baqui\s+(est(ã|a)o|v(ã|a)o)\s+(os\s+)?seus\s+follow[\s-]?ups?\b",
-        r"\bseus\s+(lembretes|compromissos)\s+(marcad[oa]s?|agendad[oa]s?|s(ã|a)o)\b",
-        r"\b(voc(ê|e))\s+tem\s+(os\s+seguintes\s+)?follow[\s-]?ups?\b",
-    ],
-}
-
-_NAME_RE = re.compile(
-    r"\b([A-ZÀ-Úa-zà-ú]*[A-ZÀ-Ú][a-zà-ú]{2,}"
-    r"(?:\s+(?:de\s+|da\s+|do\s+|dos\s+|das\s+|e\s+)?[A-ZÀ-Ú][a-zà-ú]+)*)\b"
-)
-
-# Palavras Title Case que NÃO são nomes de contato — evita falso positivo
-_NAME_STOPWORDS: set[str] = {
-    "Alfred", "Claude", "Anthropic", "Telegram", "WhatsApp",
-    "Sim", "Não", "Nao", "Ok", "Okay", "Olá", "Ola", "Oi", "Feito", "Pronto", "Certo",
-    "Obrigado", "Obrigada", "Opa", "Eba", "Entendi", "Beleza",
-    "Segunda", "Terça", "Terca", "Quarta", "Quinta", "Sexta", "Sábado", "Sabado", "Domingo",
-    "Janeiro", "Fevereiro", "Março", "Marco", "Abril", "Maio", "Junho",
-    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-    "Hoje", "Amanhã", "Amanha", "Ontem",
-    "Cadência", "Cadencia", "Contato", "Contatos", "Memória", "Memoria", "Memórias", "Memorias",
-    "Interação", "Interacao", "Interações", "Interacoes",
-    "Follow", "FollowUp", "Lembrete", "Lembretes",
-    "BRT",
-    # Verbos em 1ª pessoa do singular — começo de frase típico do Alfred
-    "Cadastrei", "Criei", "Adicionei", "Registrei", "Salvei", "Gravei", "Anotei",
-    "Marquei", "Agendei", "Programei", "Atualizei", "Defini", "Configurei",
-    "Falei", "Encontrei", "Liguei", "Conversei", "Vi", "Tive", "Arquivei", "Mesclei",
-    "Preciso", "Quero", "Quer", "Vou", "Devo", "Posso", "Consigo", "Acho", "Sei", "Tenho",
-    "Entendi", "Procurei", "Busquei", "Verifiquei", "Confirmei",
-    # Verbos 3ª pessoa comuns
-    "Feito", "Pronto", "Prontinho",
-    # Pronomes/conectores comuns em início de frase
-    "Ele", "Ela", "Eles", "Elas", "Isso", "Isto", "Aquilo", "Essa", "Esse", "Este", "Esta",
-    "Aqui", "Lá", "La", "Ali", "Agora", "Depois", "Antes", "Então", "Entao",
-    "Mas", "Porém", "Porem", "Contudo", "Portanto",
-    # Termos de empresa/organização — não são nomes de contato
-    "Banco", "Mercedes", "Inter", "Itaú", "Itau", "Bradesco", "Santander",
-    "Nubank", "Brasil", "Google", "Apple", "Microsoft", "Amazon",
-    "Igreja", "Empresa", "Grupo", "Instituto", "Fundação", "Fundacao",
-    "Associação", "Associacao", "Companhia", "Ltda", "Eireli",
-    "Capital", "Partners", "Ventures", "Labs", "Tech", "Digital",
-}
-
-
-def _extract_claimed_tools(text: str) -> set[str]:
-    text_l = text.lower()
-    claimed: set[str] = set()
-    for tool, patterns in _CLAIM_PATTERNS.items():
-        if any(re.search(p, text_l) for p in patterns):
-            claimed.add(tool)
-    return claimed
-
-
-def _extract_names(text: str) -> set[str]:
-    """Extrai candidatos a nome próprio (Title Case) do texto, filtrando stopwords.
-    Ignora a primeira palavra capitalizada de cada sentença (início de frase)."""
-    names: set[str] = set()
-    # Split por pontuação de fim de sentença + newline
-    sentences = re.split(r"[.!?\n]+", text)
-    for sent in sentences:
-        sent = sent.strip()
-        if not sent:
-            continue
-        matches = _NAME_RE.findall(sent)
-        if not matches:
-            continue
-        # O primeiro match pode ser o início da frase → só aceita se NÃO for stopword.
-        # Stopwords no início são ignoradas; não-stopwords no início passam
-        # (pode ser um nome próprio iniciando a frase, ex: "Daniel foi registrado").
-        for m in matches:
-            if m in _NAME_STOPWORDS:
-                continue
-            if len(m) < 3:
-                continue
-            names.add(m)
-    return names
-
-
-def _name_matches(a: str, b: str) -> bool:
-    a_l, b_l = a.lower(), b.lower()
-    if a_l == b_l:
-        return True
-    # Match parcial: primeiro nome ou substring
-    a_tokens = set(a_l.split())
-    b_tokens = set(b_l.split())
-    return bool(a_tokens & b_tokens)
-
-
-async def _validate_response_truthfulness(
-    user_id: str,
-    final_text: str,
-    tool_calls_log: list[tuple[str, dict]],
-) -> list[str]:
-    """Cruza o texto final com o que realmente foi executado + fonte confiável (DB)."""
-    problems: list[str] = []
-    tools_called = {name for name, _ in tool_calls_log}
-
-    # ── Validador 1: afirmação de ação sem tool call correspondente ──
-    claimed = _extract_claimed_tools(final_text)
-    for tool in claimed:
-        if tool not in tools_called:
-            problems.append(
-                f"• Você afirmou ter executado `{tool}` mas NÃO chamou essa ferramenta "
-                f"neste turno. Chame AGORA ou retire a afirmação."
-            )
-
-    # ── Validador 2: nomes mencionados que não existem no DB ──
-    names = _extract_names(final_text)
-    if names:
-        created_names: list[str] = []
-        searched_names: list[str] = []
-        for tname, tinput in tool_calls_log:
-            if tname == "create_contact":
-                dn = (tinput.get("display_name") or "").strip()
-                if dn:
-                    created_names.append(dn)
-            elif tname == "list_contacts":
-                s = (tinput.get("search") or "").strip()
-                if s:
-                    searched_names.append(s)
-
-        try:
-            db = get_db()
-            existing = (
-                db.table("contacts")
-                .select("display_name")
-                .eq("user_id", user_id)
-                .eq("status", "active")
-                .execute()
-            )
-            existing_names = [c["display_name"] for c in (existing.data or [])]
-        except Exception:
-            log.exception("validator.db_lookup_failed")
-            existing_names = []
-
-        for name in names:
-            in_db = any(_name_matches(name, e) for e in existing_names)
-            was_created = any(_name_matches(name, c) for c in created_names)
-            was_searched = any(_name_matches(name, s) for s in searched_names)
-
-            if in_db or was_created:
-                continue
-            if was_searched:
-                # Claude buscou, não achou, não criou → está confirmando algo que não existe
-                problems.append(
-                    f"• Você mencionou '{name}' mas `list_contacts` mostrou que essa pessoa "
-                    f"NÃO existe e você não chamou `create_contact`. Não confirme o que não fez."
-                )
-                continue
-            problems.append(
-                f"• Você mencionou '{name}' na resposta, mas essa pessoa não existe no banco "
-                f"e você não chamou `list_contacts` nem `create_contact` neste turno. "
-                f"Nunca invente contatos — chame `list_contacts` para verificar primeiro."
-            )
-
-    return problems
-
-
-async def _alert_owner(telegram_id: int, message: str) -> None:
-    """Send an urgent alert to the user via Telegram."""
-    try:
-        from telegram import Bot
-        from alfred.config import settings
-        bot = Bot(token=settings.telegram_bot_token)
-        await bot.send_message(chat_id=telegram_id, text=message, parse_mode="Markdown")
-    except Exception:
-        log.exception("alert.failed", telegram_id=telegram_id)
-
-
-async def _get_or_create_user(telegram_id: int, user_name: str) -> str:
-    """Return the internal user UUID for a Telegram user."""
-    db = get_db()
-    result = (
-        db.table("users")
-        .upsert(
-            {
-                "telegram_id": telegram_id,
-                "name": user_name,
-                "timezone": "America/Sao_Paulo",
-                "locale": "pt-BR",
-            },
-            on_conflict="telegram_id",
-        )
-        .execute()
-    )
-    return result.data[0]["id"]
-
-
-_PARTIAL_REPORT_LABELS: dict[str, str] = {
-    "create_contact": "Contato criado: {display_name}",
-    "create_contact_confirmed": "Contato criado: {display_name}",
-    "add_memory": "Memória salva",
-    "update_contact": "Contato atualizado",
-    "log_interaction": "Interação registrada",
-    "set_follow_up": "Follow-up agendado",
-    "set_cadence": "Cadência atualizada",
-    "archive_contact": "Contato arquivado",
-}
-
-
-def _build_partial_report(tool_calls_log: list[tuple[str, dict]]) -> str:
-    lines: list[str] = []
-    for name, args in tool_calls_log:
-        template = _PARTIAL_REPORT_LABELS.get(name)
-        if template:
-            try:
-                label = template.format_map(args)
-            except KeyError:
-                label = template.split(":")[0]
-            lines.append(f"✅ {label}")
-    return "\n".join(lines) if lines else "Nenhuma ação foi completada."
-
-
-async def _load_history(user_id: str, limit: int = 20) -> list[MessageParam]:
-    """Load recent conversation messages from DB."""
-    db = get_db()
-
-    conv_result = (
-        db.table("conversations")
-        .select("id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    if not conv_result.data:
-        return []
-
-    conv_id = conv_result.data[0]["id"]
-    msgs_result = (
-        db.table("messages")
-        .select("role, content")
-        .eq("conversation_id", conv_id)
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-
-    messages: list[MessageParam] = []
-    for row in reversed(msgs_result.data):
-        messages.append({"role": row["role"], "content": row["content"]})  # type: ignore[typeddict-item]
-    return messages
-
-
-async def _save_message(user_id: str, role: str, content: object) -> None:
-    db = get_db()
-
-    # Get or create conversation
-    conv_result = (
-        db.table("conversations")
-        .select("id")
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    if conv_result.data:
-        conv_id = conv_result.data[0]["id"]
-        db.table("conversations").update({"last_message_at": "now()"}).eq("id", conv_id).execute()
-    else:
-        new_conv = db.table("conversations").insert({"user_id": user_id, "telegram_chat_id": 0}).execute()
-        conv_id = new_conv.data[0]["id"]
-
-    db.table("messages").insert({
-        "conversation_id": conv_id,
-        "role": role,
-        "content": content,
-    }).execute()
+_CONFIRMATION_APPROVED = CONFIRMATION_APPROVED
 
 
 async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     """Run one agent turn. Returns the text response."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     brt = timezone(timedelta(hours=-3))
     now = datetime.now(brt)
     current_date_str = now.strftime("%Y-%m-%d (%A, %H:%M BRT)")
 
-    user_id = await _get_or_create_user(telegram_id, user_name)
-    history = await _load_history(user_id)
+    user_id = await get_or_create_user(telegram_id, user_name)
+    history = await load_history(user_id)
 
     # Append new user message
     history.append({"role": "user", "content": message})
-    await _save_message(user_id, "user", message)
+    await save_message(user_id, "user", message)
 
     client = get_anthropic()
     messages = list(history)
@@ -524,7 +67,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     if not skip_pending_guardrail:
         for m in reversed(history[:-1]):
             if m.get("role") == "assistant" and isinstance(m.get("content"), str):
-                skip_pending_guardrail = _is_date_confirmation_prompt(m["content"])
+                skip_pending_guardrail = is_date_confirmation_prompt(m["content"])
                 break
 
     # Tracks every tool name executed neste turno — usado pelo guardrail
@@ -569,7 +112,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 continue
             log.warning("anthropic.rate_limit_exhausted")
             if tool_calls_log:
-                partial = _build_partial_report(tool_calls_log)
+                partial = build_partial_report(tool_calls_log)
                 return (
                     "Estou com limitação de taxa. O que já foi feito:\n"
                     f"{partial}\n\n"
@@ -611,23 +154,19 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
 
         if response.stop_reason == "end_turn" or not tool_calls:
             # ───── Bypass legítimo: proposta de confirmação de data ─────
-            # Se Claude está pausando para confirmar uma data com o usuário
-            # (formato "Confirmando: ... DD/MM/AAAA ...?"), pulamos guardrail
-            # e validador. Esse é o único caso em que a ausência de tool call
-            # não é alucinação — é o fluxo propor→confirmar→executar.
             preview_text = "\n".join(b.text for b in text_blocks).strip()
-            if _is_date_confirmation_prompt(preview_text):
+            if is_date_confirmation_prompt(preview_text):
                 log.info(
                     "guardrail.date_confirmation_bypass",
                     preview=preview_text[:240],
                     tools_called=list(tools_called_this_turn),
                 )
-                await _save_message(user_id, "assistant", preview_text)
+                await save_message(user_id, "assistant", preview_text)
                 return preview_text
 
             # ───── Guardrail: verifica ferramentas pendentes ─────
             missing = (
-                _detect_pending_actions(message, tools_called_this_turn)
+                detect_pending_actions(message, tools_called_this_turn)
                 if not skip_pending_guardrail
                 else []
             )
@@ -649,16 +188,12 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                     "list_contacts primeiro. Se o contato não existir, chame create_contact. "
                     "NÃO emita texto final até que todas as ações tenham sido realmente realizadas."
                 )
-                # Continua o diálogo: injeta a resposta de Claude + correção sintética como user
                 messages.append({"role": "assistant", "content": response.content})  # type: ignore[typeddict-item]
                 messages.append({"role": "user", "content": reminder_text})
-                # Força Claude a chamar uma ferramenta no próximo round —
-                # não pode mais escapar emitindo só texto
                 force_tool_use_next_round = True
                 continue
 
-            # Guardrail esgotou retries mas ainda detecta ferramenta faltando →
-            # NUNCA retornar texto alucinado. Responde erro explícito.
+            # Guardrail esgotou retries mas ainda detecta ferramenta faltando
             if missing:
                 log.error(
                     "guardrail.exhausted",
@@ -669,7 +204,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                     "Ops, travou aqui e não consegui executar tudo o que você pediu. "
                     "Pode confirmar o que você quer que eu faça? Vou refazer com cuidado. 🙏"
                 )
-                await _save_message(user_id, "assistant", error_msg)
+                await save_message(user_id, "assistant", error_msg)
                 return error_msg
 
             # Final answer (candidato)
@@ -678,7 +213,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 final_text = "Feito."
 
             # ───── Validador de veracidade — observabilidade, não bloqueante ─────
-            truthfulness_problems = await _validate_response_truthfulness(
+            truthfulness_problems = await validate_response_truthfulness(
                 user_id=user_id,
                 final_text=final_text,
                 tool_calls_log=tool_calls_log,
@@ -691,7 +226,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 )
 
             # Save assistant message
-            await _save_message(user_id, "assistant", final_text)
+            await save_message(user_id, "assistant", final_text)
             return final_text
 
         # ───── Guardrail: bloqueia tools de data sem confirmação prévia ─────
@@ -702,12 +237,9 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                 "guardrail.date_tool_without_confirmation",
                 tools=[tc.name for tc in date_tools_requested],
             )
-            # Após bloquear, desativa pending-actions guardrail para evitar
-            # deadlock (ele exigiria chamar as mesmas tools que bloqueamos).
             skip_pending_guardrail = True
 
             blocked_results: list[ToolResultBlockParam] = []
-            # Extrai as datas que Claude tentou usar para incluir na instrução
             attempted_dates: list[str] = []
             for tc in date_tools_requested:
                 inp = dict(tc.input)  # type: ignore[arg-type]
@@ -746,8 +278,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                             user_id=user_id,
                         )
                     except Exception as exc:
-                        log.exception("tool.error", tool=tool_call.name)
-                        result = f"Erro ao executar ferramenta: {exc}"
+                        result = await handle_tool_error(exc, tool_call.name)
                     blocked_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_call.id,
@@ -769,8 +300,7 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
                     user_id=user_id,
                 )
             except Exception as exc:
-                log.exception("tool.error", tool=tool_call.name)
-                result = f"Erro ao executar ferramenta: {exc}"
+                result = await handle_tool_error(exc, tool_call.name)
 
             tool_results.append({
                 "type": "tool_result",
@@ -783,12 +313,12 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
         messages.append({"role": "user", "content": tool_results})  # type: ignore[typeddict-item]
 
     if tool_calls_log:
-        partial = _build_partial_report(tool_calls_log)
+        partial = build_partial_report(tool_calls_log)
         fallback = (
             f"Consegui fazer parte do que você pediu:\n{partial}\n\n"
             "A mensagem era longa — pode repetir o que ficou faltando? 🙏"
         )
     else:
         fallback = "Não consegui completar a solicitação. Pode tentar de novo com menos itens? 🙏"
-    await _save_message(user_id, "assistant", fallback)
+    await save_message(user_id, "assistant", fallback)
     return fallback

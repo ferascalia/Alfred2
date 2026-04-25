@@ -2,7 +2,7 @@
 
 import pytest
 
-from alfred.agent.loop import _detect_pending_actions
+from alfred.agent.guardrails.pending_actions import detect_pending_actions as _detect_pending_actions
 
 
 class TestGuardrailDoesNotBlockQueries:
