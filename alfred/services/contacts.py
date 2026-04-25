@@ -239,8 +239,9 @@ async def update_contact(user_id: str, contact_id: str, fields: dict[str, Any]) 
     result = db.table("contacts").update(fields).eq("id", contact_id).eq("user_id", user_id).execute()
     if not result.data:
         return (
-            f"Contato com ID `{contact_id}` não encontrado. "
-            "Use list_contacts para buscar o ID correto."
+            f"Contato não encontrado. "
+            "Pergunte ao usuário se deseja cadastrar essa pessoa primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar (empresa, cargo, como se conheceram)."
         )
     name = result.data[0].get("display_name", contact_id)
     return f"**{name}** atualizado: {json.dumps(fields, ensure_ascii=False)}."
@@ -261,8 +262,9 @@ async def set_cadence(user_id: str, contact_id: str, days: int = 7, weekday: int
 
     if not result.data:
         return (
-            f"Contato com ID `{contact_id}` não encontrado. "
-            "Use list_contacts para buscar o ID correto."
+            f"Contato não encontrado. "
+            "Pergunte ao usuário se deseja cadastrar essa pessoa primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar (empresa, cargo, como se conheceram)."
         )
     name = result.data[0].get("display_name", contact_id)
 
@@ -290,7 +292,11 @@ async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | No
         .execute()
     )
     if not contact_result.data:
-        return "Contato não encontrado."
+        return (
+            "Contato não encontrado. "
+            "Pergunte ao usuário se deseja cadastrar essa pessoa primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar (empresa, cargo, como se conheceram)."
+        )
 
     name = contact_result.data["display_name"]
     # Set next_nudge_at to midnight UTC on the target date — the 08:00 UTC scan will catch it
@@ -462,7 +468,8 @@ async def link_contacts(
     if missing:
         return (
             f"Não encontrei os contatos: {', '.join(missing)}. "
-            "Use list_contacts para buscar os IDs corretos antes de vincular."
+            "Pergunte ao usuário se deseja cadastrar essa(s) pessoa(s) primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar."
         )
 
     from_name = name_map[from_contact_id]
@@ -521,7 +528,8 @@ async def unlink_contacts(user_id: str, from_contact_id: str, to_contact_id: str
     if missing:
         return (
             f"Não encontrei os contatos: {', '.join(missing)}. "
-            "Use list_contacts para buscar os IDs corretos."
+            "Pergunte ao usuário se deseja cadastrar essa(s) pessoa(s) primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar."
         )
 
     from_name = name_map[from_contact_id]

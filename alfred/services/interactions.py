@@ -24,8 +24,9 @@ async def log_interaction(
     )
     if not contact_check.data:
         return (
-            f"Contato com ID `{contact_id}` não encontrado. "
-            "Use list_contacts para buscar o ID correto antes de registrar a interação."
+            "Contato não encontrado. "
+            "Pergunte ao usuário se deseja cadastrar essa pessoa primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar (empresa, cargo, como se conheceram)."
         )
 
     # Parse and validate happened_at

@@ -40,8 +40,9 @@ async def add_memory(
     )
     if not contact_check.data:
         return (
-            f"Contato com ID `{contact_id}` não encontrado. "
-            "Use list_contacts para buscar o ID correto antes de salvar a memória."
+            "Contato não encontrado. "
+            "Pergunte ao usuário se deseja cadastrar essa pessoa primeiro — "
+            "peça o nome e qualquer detalhe que ele queira adicionar (empresa, cargo, como se conheceram)."
         )
 
     embedding = await _embed(content)
