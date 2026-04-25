@@ -23,6 +23,7 @@ class ContactRow(TypedDict):
     cadence_days: int
     last_interaction_at: str | None
     next_nudge_at: str | None
+    follow_up_note: str | None
     status: str
     created_at: str
     updated_at: str

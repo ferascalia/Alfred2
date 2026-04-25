@@ -30,6 +30,17 @@ async def handle_nudge_action(nudge_id: str, action: str) -> str:
         }).eq("id", nudge_id).execute()
 
         now_iso = datetime.now(UTC).isoformat()
+
+        db.table("interactions").insert({
+            "user_id": nudge["user_id"],
+            "contact_id": nudge["contact_id"],
+            "channel": "other",
+            "direction": "outbound",
+            "summary": "Contato realizado (via lembrete)",
+            "sentiment": "neutral",
+            "happened_at": now_iso,
+        }).execute()
+
         db.rpc("update_contact_after_interaction", {
             "p_contact_id": nudge["contact_id"],
             "p_happened_at": now_iso,
