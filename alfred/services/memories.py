@@ -33,8 +33,18 @@ async def add_memory(
     kind: str,
     source: str = "user_message",
 ) -> str:
-    embedding = await _embed(content)
     db = get_db()
+
+    contact_check = (
+        db.table("contacts").select("id").eq("id", contact_id).eq("user_id", user_id).execute()
+    )
+    if not contact_check.data:
+        return (
+            f"Contato com ID `{contact_id}` não encontrado. "
+            "Use list_contacts para buscar o ID correto antes de salvar a memória."
+        )
+
+    embedding = await _embed(content)
     db.table("memories").insert({
         "user_id": user_id,
         "contact_id": contact_id,

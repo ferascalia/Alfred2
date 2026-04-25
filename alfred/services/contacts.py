@@ -236,8 +236,14 @@ async def merge_contacts(user_id: str, primary_id: str, duplicate_id: str) -> st
 
 async def update_contact(user_id: str, contact_id: str, fields: dict[str, Any]) -> str:
     db = get_db()
-    db.table("contacts").update(fields).eq("id", contact_id).eq("user_id", user_id).execute()
-    return f"Contato {contact_id} atualizado: {json.dumps(fields, ensure_ascii=False)}."
+    result = db.table("contacts").update(fields).eq("id", contact_id).eq("user_id", user_id).execute()
+    if not result.data:
+        return (
+            f"Contato com ID `{contact_id}` não encontrado. "
+            "Use list_contacts para buscar o ID correto."
+        )
+    name = result.data[0].get("display_name", contact_id)
+    return f"**{name}** atualizado: {json.dumps(fields, ensure_ascii=False)}."
 
 
 _WEEKDAY_NAMES = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
@@ -248,14 +254,21 @@ async def set_cadence(user_id: str, contact_id: str, days: int = 7, weekday: int
     Passar weekday=None limpa qualquer cadência semanal existente.
     """
     db = get_db()
-    db.table("contacts").update({
+    result = db.table("contacts").update({
         "cadence_days": days,
-        "nudge_weekday": weekday,  # None → NULL no banco, limpa cadência semanal
+        "nudge_weekday": weekday,
     }).eq("id", contact_id).eq("user_id", user_id).execute()
 
+    if not result.data:
+        return (
+            f"Contato com ID `{contact_id}` não encontrado. "
+            "Use list_contacts para buscar o ID correto."
+        )
+    name = result.data[0].get("display_name", contact_id)
+
     if weekday is not None:
-        return f"Cadência definida para toda {_WEEKDAY_NAMES[weekday]}."
-    return f"Cadência definida para {days} dias."
+        return f"Cadência de **{name}** definida para toda {_WEEKDAY_NAMES[weekday]}."
+    return f"Cadência de **{name}** definida para {days} dias."
 
 
 async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | None = None) -> str:
@@ -283,7 +296,8 @@ async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | No
     # Set next_nudge_at to midnight UTC on the target date — the 08:00 UTC scan will catch it
     next_nudge_at = f"{parsed.isoformat()}T00:00:00+00:00"
 
-    db.table("contacts").update({"next_nudge_at": next_nudge_at}).eq("id", contact_id).eq("user_id", user_id).execute()
+    update_data: dict[str, object] = {"next_nudge_at": next_nudge_at, "follow_up_note": note}
+    db.table("contacts").update(update_data).eq("id", contact_id).eq("user_id", user_id).execute()
 
     log.info("follow_up.set", user_id=user_id, contact_id=contact_id, date=date)
     note_str = f" — motivo: {note}" if note else ""
@@ -428,6 +442,9 @@ async def link_contacts(
 ) -> str:
     db = get_db()
 
+    if from_contact_id == to_contact_id:
+        return "Não é possível vincular um contato a ele mesmo. Informe dois contatos diferentes."
+
     names_result = (
         db.table("contacts")
         .select("id, display_name")
@@ -436,8 +453,20 @@ async def link_contacts(
         .execute()
     )
     name_map = {c["id"]: c["display_name"] for c in names_result.data}
-    from_name = name_map.get(from_contact_id, "?")
-    to_name = name_map.get(to_contact_id, "?")
+
+    missing = []
+    if from_contact_id not in name_map:
+        missing.append(f"from_contact_id `{from_contact_id}`")
+    if to_contact_id not in name_map:
+        missing.append(f"to_contact_id `{to_contact_id}`")
+    if missing:
+        return (
+            f"Não encontrei os contatos: {', '.join(missing)}. "
+            "Use list_contacts para buscar os IDs corretos antes de vincular."
+        )
+
+    from_name = name_map[from_contact_id]
+    to_name = name_map[to_contact_id]
 
     db.table("contact_relationships").upsert(
         {
@@ -483,8 +512,20 @@ async def unlink_contacts(user_id: str, from_contact_id: str, to_contact_id: str
         .execute()
     )
     name_map = {c["id"]: c["display_name"] for c in names_result.data}
-    from_name = name_map.get(from_contact_id, "?")
-    to_name = name_map.get(to_contact_id, "?")
+
+    missing = []
+    if from_contact_id not in name_map:
+        missing.append(f"from_contact_id `{from_contact_id}`")
+    if to_contact_id not in name_map:
+        missing.append(f"to_contact_id `{to_contact_id}`")
+    if missing:
+        return (
+            f"Não encontrei os contatos: {', '.join(missing)}. "
+            "Use list_contacts para buscar os IDs corretos."
+        )
+
+    from_name = name_map[from_contact_id]
+    to_name = name_map[to_contact_id]
 
     for a, b in [(from_contact_id, to_contact_id), (to_contact_id, from_contact_id)]:
         db.table("contact_relationships").delete().eq("user_id", user_id).eq(

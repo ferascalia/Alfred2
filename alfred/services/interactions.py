@@ -19,6 +19,15 @@ async def log_interaction(
 ) -> str:
     db = get_db()
 
+    contact_check = (
+        db.table("contacts").select("id").eq("id", contact_id).eq("user_id", user_id).execute()
+    )
+    if not contact_check.data:
+        return (
+            f"Contato com ID `{contact_id}` não encontrado. "
+            "Use list_contacts para buscar o ID correto antes de registrar a interação."
+        )
+
     # Parse and validate happened_at
     try:
         dt = datetime.fromisoformat(happened_at)
