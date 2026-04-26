@@ -38,6 +38,13 @@ def _select_agent(intent: str) -> BaseAgent:
 async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     """Multi-agent entry point. Drop-in replacement for loop.run_agent."""
     user_id = await get_or_create_user(telegram_id, user_name)
+
+    from alfred.services.limits import check_message_limit
+
+    allowed, reason = await check_message_limit(user_id)
+    if not allowed:
+        return reason
+
     history = await load_history(user_id)
 
     history.append({"role": "user", "content": message})

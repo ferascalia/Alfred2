@@ -7,6 +7,12 @@ class UserRow(TypedDict):
     name: str
     timezone: str
     locale: str
+    tier: str
+    status: str
+    monthly_token_budget_usd: float
+    max_contacts: int
+    max_messages_per_day: int
+    invited_by: str | None
     created_at: str
 
 

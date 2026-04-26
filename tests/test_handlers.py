@@ -32,7 +32,8 @@ async def test_start_handler_sends_welcome() -> None:
     fake_db = MagicMock()
     fake_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[{"id": "u1"}])
 
-    with patch("alfred.bot.handlers.get_db", return_value=fake_db):
+    with patch("alfred.bot.handlers.get_db", return_value=fake_db), \
+         patch("alfred.services.access.check_access", AsyncMock(return_value=True)):
         await start_handler(update, context)
 
     update.message.reply_text.assert_called_once()
@@ -59,9 +60,10 @@ async def test_message_handler_calls_agent() -> None:
 
 def test_nudge_keyboard_structure() -> None:
     from alfred.bot.keyboards import nudge_keyboard
+    from alfred.bot.signing import verify_callback
 
     kb = nudge_keyboard("nudge-id-123")
     assert len(kb.inline_keyboard) == 2  # 2 rows
     assert len(kb.inline_keyboard[0]) == 2  # 2 buttons per row
     first_button = kb.inline_keyboard[0][0]
-    assert "nudge:copy:nudge-id-123" == first_button.callback_data
+    assert verify_callback(first_button.callback_data) == "nudge:copy:nudge-id-123"

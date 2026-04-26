@@ -68,9 +68,20 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     tg_user = update.effective_user
+
+    from alfred.services.access import check_access
+
+    has_access = await check_access(tg_user.id)
+    if not has_access:
+        await update.message.reply_text(
+            "O Alfred está em beta fechado no momento.\n\n"
+            "Solicite acesso ao administrador.",
+            parse_mode="Markdown",
+        )
+        return
+
     db = get_db()
 
-    # Upsert user
     db.table("users").upsert(
         {
             "telegram_id": tg_user.id,
@@ -84,12 +95,13 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     log.info("user.start", telegram_id=tg_user.id, name=tg_user.full_name)
 
     await update.message.reply_text(
-        f"Olá, {tg_user.first_name}! 👋\n\n"
+        f"Olá, {tg_user.first_name}!\n\n"
         "Sou o **Alfred**, seu assistente de relacionamentos.\n\n"
         "Estou aqui para ajudar você a manter e aprofundar suas conexões — "
         "amigos, clientes, colegas — sem deixar ninguém cair no esquecimento.\n\n"
         "Pode começar me contando sobre alguém que você encontrou recentemente "
-        "ou perguntar o que precisa. Estou ouvindo. 🎩",
+        "ou perguntar o que precisa. Estou ouvindo.\n\n"
+        "Use /status para ver seu plano e limites.",
         parse_mode="Markdown",
     )
 
@@ -144,9 +156,18 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     from alfred.agent.orchestrator import run_agent
     from alfred.bot.voice import transcribe_voice
+    from alfred.services.limits import check_voice_allowed
 
     tg_user = update.effective_user
     chat_id = update.effective_chat.id  # type: ignore[union-attr]
+
+    db = get_db()
+    user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
+    if user_result.data:
+        allowed, reason = await check_voice_allowed(user_result.data["id"])
+        if not allowed:
+            await update.message.reply_text(reason)
+            return
 
     log.info("voice.received", telegram_id=tg_user.id, duration=getattr(voice, "duration", 0))
 
@@ -280,7 +301,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await query.answer()
 
-    data = query.data
+    from alfred.bot.signing import verify_callback
+
+    data = verify_callback(query.data)
+    if data is None:
+        log.warning("callback.invalid_hmac", raw=query.data[:40])
+        await query.edit_message_text("Ação expirada ou inválida.")
+        return
 
     if data.startswith("dateconfirm:"):
         await _handle_date_confirm_callback(query, data, context)
@@ -385,7 +412,18 @@ async def _handle_nudge_callback(query: object, verb: str, nudge_id: str) -> Non
     from alfred.services.nudges import handle_nudge_action
 
     q: CallbackQuery = query  # type: ignore[assignment]
-    result = await handle_nudge_action(nudge_id=nudge_id, action=verb)
+    tg_user = q.from_user
+    if not tg_user:
+        await q.edit_message_text("Usuário não identificado.")
+        return
+
+    db = get_db()
+    user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
+    if not user_result.data:
+        await q.edit_message_text("Usuário não encontrado.")
+        return
+
+    result = await handle_nudge_action(nudge_id=nudge_id, action=verb, user_id=user_result.data["id"])
 
     if verb == "copy":
         await q.edit_message_text("📋 Mensagem copiada abaixo ⬇️")
@@ -420,13 +458,20 @@ async def _handle_import_callback(query: object, data: str) -> None:
         await q.edit_message_text("❌ Importação cancelada.")
         return
 
-    parts = data.split(":")
-    if len(parts) < 3:
-        await q.edit_message_text("Ação inválida.")
+    tg_user = q.from_user
+    if not tg_user:
+        await q.edit_message_text("Usuário não identificado.")
         return
 
-    action = parts[1]
-    user_id = parts[2]
+    db = get_db()
+    user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
+    if not user_result.data:
+        await q.edit_message_text("Usuário não encontrado.")
+        return
+    user_id = user_result.data["id"]
+
+    parts = data.split(":")
+    action = parts[1] if len(parts) >= 2 else ""
 
     state = _get_import_state(user_id)
     if not state:
@@ -438,7 +483,6 @@ async def _handle_import_callback(query: object, data: str) -> None:
     decisions = state["decisions"]
 
     def _decisions_by_name(index_decisions: dict) -> dict:
-        """Convert {int_index: decision} to {display_name: decision} for execute_import."""
         result: dict = {}
         for idx, decision in index_decisions.items():
             try:
@@ -480,10 +524,8 @@ async def _handle_import_callback(query: object, data: str) -> None:
         await q.edit_message_text(comparison, parse_mode="Markdown", reply_markup=keyboard)
 
     elif action.startswith("dup_"):
-        if len(parts) < 4:
-            return
         dup_action = action.replace("dup_", "")
-        dup_index = int(parts[3])
+        dup_index = int(parts[2]) if len(parts) >= 3 else 0
 
         action_map = {"skip": "skip", "new": "import_new", "merge": "merge", "replace": "replace"}
         decisions[dup_index] = action_map.get(dup_action, "skip")

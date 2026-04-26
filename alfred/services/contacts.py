@@ -159,6 +159,12 @@ async def find_similar_contacts(user_id: str, display_name: str, threshold: floa
 
 
 async def create_contact(user_id: str, **kwargs: Any) -> str:
+    from alfred.services.limits import check_contact_limit
+
+    allowed, reason = await check_contact_limit(user_id)
+    if not allowed:
+        return reason
+
     display_name = kwargs.get("display_name", "")
     similar = await find_similar_contacts(user_id, display_name)
     if similar:
@@ -189,6 +195,12 @@ async def create_contact(user_id: str, **kwargs: Any) -> str:
 
 async def create_contact_confirmed(user_id: str, **kwargs: Any) -> str:
     """Create contact skipping duplicate check."""
+    from alfred.services.limits import check_contact_limit
+
+    allowed, reason = await check_contact_limit(user_id)
+    if not allowed:
+        return reason
+
     db = get_db()
     data = {"user_id": user_id, "status": "active", **kwargs}
     result = db.table("contacts").insert(data).execute()

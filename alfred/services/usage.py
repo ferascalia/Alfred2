@@ -104,6 +104,43 @@ async def get_monthly_spend() -> float:
         return 0.0
 
 
+async def get_user_monthly_spend(user_id: str) -> float:
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    try:
+        db = get_db()
+        result = (
+            db.table("api_usage")
+            .select("cost_usd")
+            .eq("user_id", user_id)
+            .gte("created_at", month_start.isoformat())
+            .execute()
+        )
+        return sum(row["cost_usd"] for row in result.data)
+    except Exception:
+        log.exception("usage.get_user_spend_failed", user_id=user_id)
+        return 0.0
+
+
+async def get_user_daily_messages(user_id: str) -> int:
+    now = datetime.now(timezone.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        db = get_db()
+        result = (
+            db.table("api_usage")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .gte("created_at", day_start.isoformat())
+            .neq("model", "__alert__")
+            .execute()
+        )
+        return result.count or 0
+    except Exception:
+        log.exception("usage.get_user_daily_failed", user_id=user_id)
+        return 0
+
+
 async def _check_budget_alerts() -> None:
     budget = settings.anthropic_monthly_budget_usd
     if budget <= 0:

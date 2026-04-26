@@ -33,6 +33,12 @@ async def add_memory(
     kind: str,
     source: str = "user_message",
 ) -> str:
+    from alfred.services.limits import check_memory_limit
+
+    allowed, reason = await check_memory_limit(user_id)
+    if not allowed:
+        return reason
+
     db = get_db()
 
     contact_check = (

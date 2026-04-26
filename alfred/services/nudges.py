@@ -8,10 +8,17 @@ from alfred.db.client import get_db
 log = structlog.get_logger()
 
 
-async def handle_nudge_action(nudge_id: str, action: str) -> str:
+async def handle_nudge_action(nudge_id: str, action: str, user_id: str) -> str:
     db = get_db()
 
-    nudge_result = db.table("nudges").select("*").eq("id", nudge_id).single().execute()
+    nudge_result = (
+        db.table("nudges")
+        .select("*")
+        .eq("id", nudge_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
     if not nudge_result.data:
         return "Lembrete não encontrado."
 

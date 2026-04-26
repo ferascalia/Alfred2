@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     admin_telegram_id: int = 0
     anthropic_monthly_budget_usd: float = 5.0
 
+    # Multi-tenant access control
+    allowed_telegram_ids: str = ""
+
 
 
 settings = Settings()  # type: ignore[call-arg]

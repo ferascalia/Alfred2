@@ -6,6 +6,12 @@ from telegram.ext import (
     filters,
 )
 
+from alfred.bot.admin_handlers import (
+    admin_invite_handler,
+    admin_set_tier_handler,
+    admin_users_handler,
+    status_handler,
+)
 from alfred.bot.handlers import (
     callback_handler,
     import_command_handler,
@@ -27,6 +33,10 @@ def build_application() -> Application:  # type: ignore[type-arg]
 
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("import", import_command_handler))
+    app.add_handler(CommandHandler("status", status_handler))
+    app.add_handler(CommandHandler("admin_invite", admin_invite_handler))
+    app.add_handler(CommandHandler("admin_users", admin_users_handler))
+    app.add_handler(CommandHandler("admin_set_tier", admin_set_tier_handler))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(
         filters.Document.FileExtension("csv") | filters.Document.FileExtension("xlsx"),
