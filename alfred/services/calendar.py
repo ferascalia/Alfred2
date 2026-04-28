@@ -2,7 +2,7 @@
 
 import base64
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import resend
 import structlog
@@ -29,7 +29,7 @@ def generate_ics(
 ) -> str:
     uid = f"{uuid.uuid4()}@alfred"
     end_dt = start_dt + timedelta(minutes=duration_minutes)
-    now = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dtstart = start_dt.strftime("%Y%m%dT%H%M%SZ")
     dtend = end_dt.strftime("%Y%m%dT%H%M%SZ")
 
