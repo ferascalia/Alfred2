@@ -112,3 +112,53 @@ async def test_send_calendar_invite_failure():
             from_email="alfred@example.com",
         )
     assert "Erro ao enviar" in result
+
+
+# ---------------------------------------------------------------------------
+# Task 5: send_calendar_invite_tool
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_calendar_invite_tool_success():
+    from alfred.services.calendar import send_calendar_invite_tool
+
+    fake_contact = {"display_name": "Marina", "email": None, "user_id": "u1"}
+    fake_db = MagicMock()
+    fake_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(data=fake_contact)
+
+    mock_resend = MagicMock()
+    mock_resend.Emails.send.return_value = {"id": "email_123"}
+
+    with (
+        patch("alfred.services.calendar.get_db", return_value=fake_db),
+        patch("alfred.services.calendar.resend", mock_resend),
+        patch("alfred.services.calendar.settings") as mock_settings,
+    ):
+        mock_settings.calendar_sender_email = "alfred@example.com"
+        mock_settings.resend_api_key = "re_test"
+        result = await send_calendar_invite_tool(
+            user_id="u1",
+            contact_id="c1",
+            contact_email="marina@example.com",
+            title="Almoço com Marina",
+            start_datetime="2026-05-01T12:30:00",
+        )
+    assert "Convite enviado" in result
+
+
+@pytest.mark.asyncio
+async def test_send_calendar_invite_tool_contact_not_found():
+    from alfred.services.calendar import send_calendar_invite_tool
+
+    fake_db = MagicMock()
+    fake_db.table.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(data=None)
+
+    with patch("alfred.services.calendar.get_db", return_value=fake_db):
+        result = await send_calendar_invite_tool(
+            user_id="u1",
+            contact_id="c1",
+            contact_email="marina@example.com",
+            title="Almoço",
+            start_datetime="2026-05-01T12:30:00",
+        )
+    assert "não encontrado" in result

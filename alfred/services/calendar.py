@@ -8,6 +8,7 @@ import resend
 import structlog
 
 from alfred.config import settings
+from alfred.db.client import get_db
 
 log = structlog.get_logger()
 
@@ -91,3 +92,54 @@ async def send_calendar_invite(
     except Exception as exc:
         log.error("calendar.invite_failed", to=to_email, error=str(exc))
         return f"Erro ao enviar convite para {to_email}: {exc}"
+
+
+async def send_calendar_invite_tool(
+    user_id: str,
+    contact_id: str,
+    contact_email: str,
+    title: str,
+    start_datetime: str,
+    duration_minutes: int = 30,
+    location: str | None = None,
+    description: str | None = None,
+) -> str:
+    db = get_db()
+    contact_result = (
+        db.table("contacts")
+        .select("display_name, email, user_id")
+        .eq("id", contact_id)
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    if not contact_result.data:
+        return "Contato não encontrado. Verifique o contact_id."
+
+    contact_name = contact_result.data["display_name"]
+    start_dt = datetime.fromisoformat(start_datetime)
+
+    ics = generate_ics(
+        summary=title,
+        start_dt=start_dt,
+        organizer_email=settings.calendar_sender_email,
+        attendee_email=contact_email,
+        duration_minutes=duration_minutes,
+        location=location,
+        description=description,
+    )
+
+    body_text = (
+        f"Olá {contact_name},\n\n"
+        f"Você recebeu um convite: {title}.\n"
+        f"Aceite o anexo .ics para adicionar ao seu calendário.\n\n"
+        "— Alfred"
+    )
+
+    return await send_calendar_invite(
+        to_email=contact_email,
+        subject=title,
+        body_text=body_text,
+        ics_content=ics,
+        from_email=settings.calendar_sender_email,
+    )
