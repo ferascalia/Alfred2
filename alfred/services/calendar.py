@@ -4,7 +4,10 @@ import base64
 import uuid
 from datetime import datetime, timedelta
 
+import resend
 import structlog
+
+from alfred.config import settings
 
 log = structlog.get_logger()
 
@@ -58,3 +61,33 @@ def generate_ics(
         "END:VCALENDAR",
     ]
     return "\r\n".join(lines)
+
+
+async def send_calendar_invite(
+    to_email: str,
+    subject: str,
+    body_text: str,
+    ics_content: str,
+    from_email: str,
+) -> str:
+    try:
+        resend.api_key = settings.resend_api_key
+        ics_b64 = base64.b64encode(ics_content.encode("utf-8")).decode("ascii")
+        resend.Emails.send({
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "text": body_text,
+            "attachments": [
+                {
+                    "filename": "invite.ics",
+                    "content": ics_b64,
+                    "content_type": "text/calendar; method=REQUEST",
+                }
+            ],
+        })
+        log.info("calendar.invite_sent", to=to_email, subject=subject)
+        return f"Convite enviado para {to_email}."
+    except Exception as exc:
+        log.error("calendar.invite_failed", to=to_email, error=str(exc))
+        return f"Erro ao enviar convite para {to_email}: {exc}"
