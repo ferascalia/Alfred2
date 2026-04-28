@@ -10,14 +10,17 @@ from alfred.agent.prompt_sections import (
     PROMPT_BASE,
     PROMPT_CLOSING,
     PROMPT_DATE_CONFIRM,
+    PROMPT_SCHEDULING,
 )
 from alfred.agent.tools.schemas import (
     ACTIVITY_WRITE_TOOLS,
+    CALENDAR_TOOLS,
     CORE_WRITE_TOOLS,
     GET_CONTACT_DIGEST_SCHEMA,
     LIST_CONTACTS_SCHEMA,
     LIST_FOLLOW_UPS_SCHEMA,
     SEARCH_MEMORIES_SCHEMA,
+    UPDATE_CONTACT_SCHEMA,
 )
 
 _DATETIME_SUFFIX = (
@@ -39,13 +42,14 @@ class ActivityAgent(BaseAgent):
     )
 
     def get_tools(self) -> list[dict[str, Any]]:
-        return CORE_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + [
+        return CORE_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + CALENDAR_TOOLS + [
             LIST_CONTACTS_SCHEMA,
             SEARCH_MEMORIES_SCHEMA,
             GET_CONTACT_DIGEST_SCHEMA,
             LIST_FOLLOW_UPS_SCHEMA,
+            UPDATE_CONTACT_SCHEMA,
         ]
 
     def build_prompt(self, ctx: AgentContext) -> str:
-        sections = [PROMPT_BASE, PROMPT_ACTION, PROMPT_DATE_CONFIRM, PROMPT_CLOSING]
+        sections = [PROMPT_BASE, PROMPT_ACTION, PROMPT_DATE_CONFIRM, PROMPT_SCHEDULING, PROMPT_CLOSING]
         return "\n".join(sections) + _DATETIME_SUFFIX.format(current_date=ctx.current_date)

@@ -233,7 +233,7 @@ class BaseAgent(ABC):
                 )
 
             # ─── Date-tool blocking guardrail ─────────────────
-            _DATE_TOOLS = {"set_follow_up", "log_interaction"}
+            _DATE_TOOLS = {"set_follow_up", "log_interaction", "send_calendar_invite"}
             date_tools_requested = [tc for tc in tool_calls if tc.name in _DATE_TOOLS]
 
             if date_tools_requested and self.guardrail_config.date_confirmation and not skip_pending:
@@ -247,7 +247,7 @@ class BaseAgent(ABC):
                 attempted_dates: list[str] = []
                 for tc in date_tools_requested:
                     inp = dict(tc.input)  # type: ignore[arg-type]
-                    d = inp.get("date") or inp.get("happened_at") or ""
+                    d = inp.get("date") or inp.get("happened_at") or inp.get("start_datetime") or ""
                     if d:
                         attempted_dates.append(d)
                 date_hint = ""

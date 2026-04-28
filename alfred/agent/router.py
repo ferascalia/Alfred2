@@ -25,8 +25,8 @@ Sinais: "mostra", "lista", "quem", "quais", "quantos", "o que eu sei", "me fala 
 CONTACT — gerenciar contatos (cadastrar, atualizar, editar, arquivar, mesclar, vincular, desvincular)
 Sinais: "cadastra", "cria contato", "adiciona o X", "cadastra o X do [empresa]", "atualiza", "edita contato", "edita o X", "muda o cargo", "altera", "mescla", "arquiva", "vincula", "linka", "desvincula", "hierarquia", "o X reporta pro Y", "subordinado ao Y"
 
-RECORD — registrar atividade (interação, memória, follow-up, cadência)
-Sinais: "falei com", "me lembra", "toda terça", "salva que", "marca follow-up"
+RECORD — registrar atividade (interação, memória, follow-up, cadência, agendar evento)
+Sinais: "falei com", "me lembra", "toda terça", "salva que", "marca follow-up", "agenda reunião", "manda convite", "vou encontrar", "marca encontro", "almoço com"
 
 DRAFT — rascunhar mensagem para contato
 Sinais: "rascunha", "escreve uma mensagem", "monta um texto"
