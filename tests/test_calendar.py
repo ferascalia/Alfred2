@@ -183,3 +183,48 @@ async def test_dispatch_send_calendar_invite():
             user_id="u1",
         )
     assert "Convite enviado" in result
+
+
+# ─── Integration tests ──────────────────────────────────────────────
+
+
+def test_send_calendar_invite_schema_valid():
+    from alfred.agent.tools.schemas import SEND_CALENDAR_INVITE_SCHEMA
+
+    assert SEND_CALENDAR_INVITE_SCHEMA["name"] == "send_calendar_invite"
+    assert "contact_id" in SEND_CALENDAR_INVITE_SCHEMA["input_schema"]["required"]
+    assert "start_datetime" in SEND_CALENDAR_INVITE_SCHEMA["input_schema"]["required"]
+
+
+def test_calendar_tools_in_all_schemas():
+    from alfred.agent.tools.schemas import ALL_TOOL_SCHEMAS
+
+    names = [t["name"] for t in ALL_TOOL_SCHEMAS]
+    assert "send_calendar_invite" in names
+
+
+def test_activity_agent_has_calendar_tools():
+    from alfred.agent.agents.activity import ActivityAgent
+
+    agent = ActivityAgent()
+    tool_names = [t["name"] for t in agent.get_tools()]
+    assert "send_calendar_invite" in tool_names
+    assert "update_contact" in tool_names
+
+
+def test_activity_agent_prompt_has_scheduling():
+    from alfred.agent.agents.activity import ActivityAgent
+    from alfred.agent.context import AgentContext
+
+    agent = ActivityAgent()
+    ctx = AgentContext(
+        user_id="u1",
+        telegram_id=123,
+        user_name="Test",
+        message="test",
+        current_date="2026-04-28",
+        is_confirmation=False,
+    )
+    prompt = agent.build_prompt(ctx)
+    assert "send_calendar_invite" in prompt
+    assert "Agendamento de eventos" in prompt
