@@ -75,6 +75,24 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
         return result.text
 
     route = await router.classify(message)
+
+    if route.intent == "CONVERSATION" and route.confidence < 0.7:
+        _ACTION_KEYWORDS = {
+            "editar", "edita", "mudar", "muda", "alterar", "altera",
+            "vincular", "vincula", "linkar", "linka", "desvincular",
+            "atualizar", "atualiza", "contato", "contatos",
+            "hierarquia", "subordinado", "reporta", "cargo",
+        }
+        msg_lower = message.lower()
+        if any(kw in msg_lower for kw in _ACTION_KEYWORDS):
+            log.warning(
+                "orchestrator.reroute",
+                original_intent="CONVERSATION",
+                confidence=route.confidence,
+                new_intent="CONTACT",
+            )
+            route = router.RouteResult(intent="CONTACT", confidence=route.confidence)
+
     ctx.intent = route.intent
 
     log.info(

@@ -22,8 +22,8 @@ Analise a mensagem do usuário e classifique em UMA categoria:
 QUERY — consultar informações (listar follow-ups, buscar contatos, ver memórias, perguntar o que sabe sobre alguém)
 Sinais: "mostra", "lista", "quem", "quais", "quantos", "o que eu sei", "me fala sobre"
 
-CONTACT — gerenciar contatos (cadastrar, atualizar, arquivar, mesclar, vincular)
-Sinais: "cadastra", "cria contato", "adiciona o X", "cadastra o X do [empresa]", "atualiza o cargo", "mescla", "arquiva", "o X reporta pro Y"
+CONTACT — gerenciar contatos (cadastrar, atualizar, editar, arquivar, mesclar, vincular, desvincular)
+Sinais: "cadastra", "cria contato", "adiciona o X", "cadastra o X do [empresa]", "atualiza", "edita contato", "edita o X", "muda o cargo", "altera", "mescla", "arquiva", "vincula", "linka", "desvincula", "hierarquia", "o X reporta pro Y", "subordinado ao Y"
 
 RECORD — registrar atividade (interação, memória, follow-up, cadência)
 Sinais: "falei com", "me lembra", "toda terça", "salva que", "marca follow-up"
@@ -33,6 +33,7 @@ Sinais: "rascunha", "escreve uma mensagem", "monta um texto"
 
 CONVERSATION — conversa casual, saudação, meta-pergunta sobre o Alfred
 Sinais: "oi", "obrigado", "o que você faz?", "como funciona"
+NÃO é CONVERSATION se mencionar ação sobre contatos ("editar", "vincular", "cargo", "empresa", "contato")
 
 MULTI — múltiplas ações que cruzam domínios (cadastrar E registrar interação, cadastrar E follow-up)
 Sinais: pessoa nova + interação, pessoa nova + follow-up, múltiplos domínios na mesma frase
