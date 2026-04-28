@@ -344,8 +344,39 @@ DRAFT_TOOLS: list[dict[str, Any]] = [
     DRAFT_MESSAGE_SCHEMA,
 ]
 
+# ─── Calendar tools ──────────────────────────────────────────────────
+
+SEND_CALENDAR_INVITE_SCHEMA: dict[str, Any] = {
+    "name": "send_calendar_invite",
+    "description": (
+        "Envia um convite de calendário (.ics) por email para um contato. "
+        "Use APENAS quando TODOS os dados estiverem confirmados pelo usuário: "
+        "contact_id, email do contato, data/hora, título. "
+        "Se o email do contato era novo, chame update_contact para salvá-lo depois. "
+        "Depois chame log_interaction com channel='email', direction='outbound'."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "contact_id": {"type": "string", "description": "ID do contato"},
+            "contact_email": {"type": "string", "description": "Email do contato (destinatário do convite)"},
+            "title": {"type": "string", "description": "Título do evento, ex: 'Almoço com Marina'"},
+            "start_datetime": {
+                "type": "string",
+                "description": "Data e hora de início em ISO 8601, ex: '2026-05-01T14:00:00'",
+            },
+            "duration_minutes": {"type": "integer", "default": 30, "description": "Duração em minutos (padrão 30)"},
+            "location": {"type": "string", "description": "Local presencial ou link de reunião (opcional)"},
+            "description": {"type": "string", "description": "Notas ou contexto do evento (opcional)"},
+        },
+        "required": ["contact_id", "contact_email", "title", "start_datetime"],
+    },
+}
+
+CALENDAR_TOOLS: list[dict[str, Any]] = [SEND_CALENDAR_INVITE_SCHEMA]
+
 # ─── Flat list (backwards-compatible with loop.py) ─────────────────
 
 ALL_TOOL_SCHEMAS: list[dict[str, Any]] = (
-    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + DRAFT_TOOLS
+    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + DRAFT_TOOLS + CALENDAR_TOOLS
 )

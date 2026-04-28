@@ -162,3 +162,24 @@ async def test_send_calendar_invite_tool_contact_not_found():
             start_datetime="2026-05-01T12:30:00",
         )
     assert "não encontrado" in result
+
+
+@pytest.mark.asyncio
+async def test_dispatch_send_calendar_invite():
+    from alfred.agent.tools.dispatch import dispatch_tool
+
+    with patch(
+        "alfred.services.calendar.send_calendar_invite_tool",
+        AsyncMock(return_value="Convite enviado para marina@example.com."),
+    ):
+        result = await dispatch_tool(
+            "send_calendar_invite",
+            {
+                "contact_id": "c1",
+                "contact_email": "marina@example.com",
+                "title": "Almoço",
+                "start_datetime": "2026-05-01T12:30:00",
+            },
+            user_id="u1",
+        )
+    assert "Convite enviado" in result

@@ -95,4 +95,8 @@ async def dispatch_tool(
         from alfred.services.contacts import get_contact_network
         return await get_contact_network(user_id=user_id, **tool_input)
 
+    if tool_name == "send_calendar_invite":
+        from alfred.services.calendar import send_calendar_invite_tool
+        return await send_calendar_invite_tool(user_id=user_id, **tool_input)
+
     return f"Ferramenta '{tool_name}' não reconhecida."
