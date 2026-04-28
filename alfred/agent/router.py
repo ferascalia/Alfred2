@@ -23,7 +23,7 @@ QUERY — consultar informações (listar follow-ups, buscar contatos, ver memó
 Sinais: "mostra", "lista", "quem", "quais", "quantos", "o que eu sei", "me fala sobre"
 
 CONTACT — gerenciar contatos (cadastrar, atualizar, arquivar, mesclar, vincular)
-Sinais: "cadastra", "cria contato", "atualiza o cargo", "mescla", "arquiva", "o X reporta pro Y"
+Sinais: "cadastra", "cria contato", "adiciona o X", "cadastra o X do [empresa]", "atualiza o cargo", "mescla", "arquiva", "o X reporta pro Y"
 
 RECORD — registrar atividade (interação, memória, follow-up, cadência)
 Sinais: "falei com", "me lembra", "toda terça", "salva que", "marca follow-up"
@@ -42,7 +42,9 @@ Responda APENAS com JSON:
 
 O campo "agents" só é necessário quando intent é MULTI — lista os agentes na ordem de execução.
 
-Na dúvida: RECORD > CONTACT > QUERY (mais seguro, mais guardrails).\
+Na dúvida entre CONTACT e RECORD: se o usuário pede para cadastrar, criar ou adicionar uma pessoa → CONTACT.
+Se relata algo que aconteceu (interação, memória, follow-up) → RECORD.
+Na dúvida geral: CONTACT > RECORD > QUERY.\
 """
 
 _VALID_INTENTS: set[IntentType] = {

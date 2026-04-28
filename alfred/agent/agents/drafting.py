@@ -11,6 +11,7 @@ from alfred.agent.prompt_sections import (
     PROMPT_DRAFTING,
 )
 from alfred.agent.tools.schemas import (
+    CORE_WRITE_TOOLS,
     DRAFT_TOOLS,
     GET_CONTACT_DIGEST_SCHEMA,
     LIST_CONTACTS_SCHEMA,
@@ -29,7 +30,7 @@ class DraftingAgent(BaseAgent):
     guardrail_config = GuardrailConfig()
 
     def get_tools(self) -> list[dict[str, Any]]:
-        return DRAFT_TOOLS + [
+        return CORE_WRITE_TOOLS + DRAFT_TOOLS + [
             SEARCH_MEMORIES_SCHEMA,
             GET_CONTACT_DIGEST_SCHEMA,
             LIST_CONTACTS_SCHEMA,

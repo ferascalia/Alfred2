@@ -109,3 +109,18 @@ def test_tool_schemas_have_required_fields() -> None:
         assert "name" in tool, f"Tool missing 'name': {tool}"
         assert "description" in tool, f"Tool missing 'description': {tool}"
         assert "input_schema" in tool, f"Tool missing 'input_schema': {tool}"
+
+
+def test_core_write_tools_in_all_write_agents() -> None:
+    """All write-capable agents must include CORE_WRITE_TOOLS."""
+    from alfred.agent.agents.activity import ActivityAgent
+    from alfred.agent.agents.contact import ContactAgent
+    from alfred.agent.agents.drafting import DraftingAgent
+    from alfred.agent.tools.schemas import CORE_WRITE_TOOLS
+
+    core_names = {t["name"] for t in CORE_WRITE_TOOLS}
+
+    for AgentCls in [ActivityAgent, ContactAgent, DraftingAgent]:
+        agent_tool_names = {t["name"] for t in AgentCls().get_tools()}
+        missing = core_names - agent_tool_names
+        assert not missing, f"{AgentCls.__name__} missing core tools: {missing}"

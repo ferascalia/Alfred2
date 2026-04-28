@@ -4,6 +4,7 @@ from alfred.agent.tools.dispatch import dispatch_tool
 from alfred.agent.tools.schemas import (
     ALL_TOOL_SCHEMAS as TOOL_SCHEMAS,
     READ_TOOLS,
+    CORE_WRITE_TOOLS,
     CONTACT_WRITE_TOOLS,
     ACTIVITY_WRITE_TOOLS,
     DRAFT_TOOLS,
@@ -12,6 +13,7 @@ from alfred.agent.tools.schemas import (
 __all__ = [
     "TOOL_SCHEMAS",
     "READ_TOOLS",
+    "CORE_WRITE_TOOLS",
     "CONTACT_WRITE_TOOLS",
     "ACTIVITY_WRITE_TOOLS",
     "DRAFT_TOOLS",

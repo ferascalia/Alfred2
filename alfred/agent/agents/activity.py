@@ -13,6 +13,7 @@ from alfred.agent.prompt_sections import (
 )
 from alfred.agent.tools.schemas import (
     ACTIVITY_WRITE_TOOLS,
+    CORE_WRITE_TOOLS,
     GET_CONTACT_DIGEST_SCHEMA,
     LIST_CONTACTS_SCHEMA,
     LIST_FOLLOW_UPS_SCHEMA,
@@ -38,7 +39,7 @@ class ActivityAgent(BaseAgent):
     )
 
     def get_tools(self) -> list[dict[str, Any]]:
-        return ACTIVITY_WRITE_TOOLS + [
+        return CORE_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + [
             LIST_CONTACTS_SCHEMA,
             SEARCH_MEMORIES_SCHEMA,
             GET_CONTACT_DIGEST_SCHEMA,

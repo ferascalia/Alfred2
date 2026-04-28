@@ -33,6 +33,14 @@ def _has_date_confirmation(text: str) -> bool:
     )
 
 
+def _has_contact_confirmation(text: str) -> bool:
+    """Check if any line starts with 'Cadastrando:' (case-insensitive)."""
+    return any(
+        re.match(r"^\s*cadastrando\s*:", line, re.IGNORECASE)
+        for line in text.split("\n")
+    )
+
+
 async def _send_response_with_confirmation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -58,6 +66,21 @@ async def _send_response_with_confirmation(
             response,
             parse_mode="Markdown",
             reply_markup=date_confirm_keyboard(confirmation_id),
+        )
+    elif _has_contact_confirmation(response):
+        from alfred.bot.keyboards import confirm_keyboard
+
+        confirmation_id = uuid.uuid4().hex[:12]
+        if context.user_data is not None:
+            context.user_data[f"contactconfirm:{confirmation_id}"] = {
+                "telegram_id": telegram_id,
+                "user_name": user_name,
+                "confirmation_text": response,
+            }
+        await update.message.reply_text(
+            response,
+            parse_mode="Markdown",
+            reply_markup=confirm_keyboard("contactconfirm", confirmation_id),
         )
     else:
         await update.message.reply_text(response, parse_mode="Markdown")
@@ -313,6 +336,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _handle_date_confirm_callback(query, data, context)
         return
 
+    if data.startswith("contactconfirm:"):
+        await _handle_contact_confirm_callback(query, data, context)
+        return
+
     if data.startswith("import:"):
         await _handle_import_callback(query, data)
         return
@@ -400,6 +427,72 @@ async def _handle_date_confirm_callback(
             )
 
         # Limpa dados pendentes — próxima mensagem será processada normalmente
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+    else:
+        await q.edit_message_text("Ação não reconhecida.")
+
+
+async def _handle_contact_confirm_callback(
+    query: object, data: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle contactconfirm:confirm:{id} and contactconfirm:cancel:{id} callbacks."""
+    from telegram import CallbackQuery
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        await q.edit_message_text("Ação inválida.")
+        return
+
+    verb, confirmation_id = parts[1], parts[2]
+    pending_key = f"contactconfirm:{confirmation_id}"
+    pending = (context.user_data or {}).get(pending_key)
+
+    if not pending:
+        await q.edit_message_text(
+            "⏳ Essa confirmação expirou. Me diga de novo quem quer cadastrar."
+        )
+        return
+
+    from alfred.agent.orchestrator import run_agent
+
+    if verb == "confirm":
+        original_text = pending["confirmation_text"]
+        await q.edit_message_text(f"{original_text}\n\n✅ _Confirmado_", parse_mode="Markdown")
+
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        typing_task = None
+        if chat_id:
+            async def keep_typing() -> None:
+                try:
+                    while True:
+                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                        await asyncio.sleep(4)
+                except asyncio.CancelledError:
+                    pass
+
+            typing_task = context.application.create_task(keep_typing())
+
+        try:
+            response = await run_agent(
+                telegram_id=pending["telegram_id"],
+                user_name=pending["user_name"],
+                message=f"[CADASTRO APROVADO] {original_text}",
+            )
+        finally:
+            if typing_task:
+                typing_task.cancel()
+                await asyncio.sleep(0)
+
+        if chat_id:
+            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode="Markdown")
+
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+
+    elif verb == "cancel":
+        await q.edit_message_text("❌ Cadastro cancelado.")
         if context.user_data and pending_key in context.user_data:
             del context.user_data[pending_key]
     else:

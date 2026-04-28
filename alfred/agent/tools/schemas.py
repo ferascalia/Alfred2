@@ -217,9 +217,12 @@ UNLINK_CONTACTS_SCHEMA: dict[str, Any] = {
     },
 }
 
-CONTACT_WRITE_TOOLS: list[dict[str, Any]] = [
+CORE_WRITE_TOOLS: list[dict[str, Any]] = [
     CREATE_CONTACT_SCHEMA,
     CREATE_CONTACT_CONFIRMED_SCHEMA,
+]
+
+CONTACT_WRITE_TOOLS: list[dict[str, Any]] = [
     UPDATE_CONTACT_SCHEMA,
     ARCHIVE_CONTACT_SCHEMA,
     MERGE_CONTACTS_SCHEMA,
@@ -344,5 +347,5 @@ DRAFT_TOOLS: list[dict[str, Any]] = [
 # ─── Flat list (backwards-compatible with loop.py) ─────────────────
 
 ALL_TOOL_SCHEMAS: list[dict[str, Any]] = (
-    READ_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + DRAFT_TOOLS
+    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + DRAFT_TOOLS
 )

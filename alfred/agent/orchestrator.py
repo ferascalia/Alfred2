@@ -13,6 +13,8 @@ from alfred.agent.agents.query import QueryAgent
 from alfred.agent.base import BaseAgent
 from alfred.agent.context import AgentContext, AgentResult
 from alfred.agent.guardrails.date_confirmation import CONFIRMATION_APPROVED
+
+CONTACT_CONFIRMATION_APPROVED = "[CADASTRO APROVADO]"
 from alfred.agent.history import (
     get_or_create_user,
     load_history,
@@ -63,6 +65,12 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     if ctx.is_confirmation:
         log.info("orchestrator.confirmation_bypass")
         result = await ActivityAgent().run(ctx)
+        await save_message(user_id, "assistant", result.text)
+        return result.text
+
+    if message.startswith(CONTACT_CONFIRMATION_APPROVED):
+        log.info("orchestrator.contact_confirmation_bypass")
+        result = await ContactAgent().run(ctx)
         await save_message(user_id, "assistant", result.text)
         return result.text
 
