@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Multi-tenant access control
     allowed_telegram_ids: str = ""
 
+    # Resend (email / calendar invites)
+    resend_api_key: str = ""
+    calendar_sender_email: str = ""
+
 
 
 settings = Settings()  # type: ignore[call-arg]
