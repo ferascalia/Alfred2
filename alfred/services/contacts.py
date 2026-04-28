@@ -124,6 +124,7 @@ async def get_contact_digest(user_id: str, contact_id: str) -> str:
     lines = [
         f"**{c['display_name']}**",
         f"Empresa: {c.get('company') or '—'} | Cargo: {c.get('role') or '—'}",
+        f"Email: {c.get('email') or '—'}",
         f"Cadência: {cadence_str}",
         f"Último contato: {c.get('last_interaction_at', 'nunca')[:10] if c.get('last_interaction_at') else 'nunca'}",
         "",

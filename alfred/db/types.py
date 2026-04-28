@@ -26,6 +26,7 @@ class ContactRow(TypedDict):
     relationship_type: str | None
     company: str | None
     role: str | None
+    email: str | None
     cadence_days: int
     last_interaction_at: str | None
     next_nudge_at: str | None
