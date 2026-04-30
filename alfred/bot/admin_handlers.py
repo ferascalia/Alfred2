@@ -6,8 +6,7 @@ from telegram.ext import ContextTypes
 
 from alfred.config import settings
 from alfred.db.client import get_db
-from alfred.services.limits import TIER_LIMITS, get_limits, get_user_tier
-from alfred.services.usage import get_user_daily_messages, get_user_monthly_spend
+from alfred.services.limits import build_status_text, get_limits, get_user_tier
 
 log = structlog.get_logger()
 
@@ -22,48 +21,13 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     tg_user = update.effective_user
     db = get_db()
-    user_result = db.table("users").select("*").eq("telegram_id", tg_user.id).single().execute()
+    user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
     if not user_result.data:
         await update.message.reply_text("Usuário não encontrado. Use /start primeiro.")
         return
 
-    user = user_result.data
-    user_id = user["id"]
-    tier = user.get("tier", "free")
-    limits = get_limits(tier)
-
-    daily_msgs = await get_user_daily_messages(user_id)
-    monthly_spend = await get_user_monthly_spend(user_id)
-
-    contact_count = (
-        db.table("contacts")
-        .select("id", count="exact")
-        .eq("user_id", user_id)
-        .eq("status", "active")
-        .execute()
-    )
-    contacts = contact_count.count or 0
-
-    memory_count = (
-        db.table("memories")
-        .select("id", count="exact")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    memories = memory_count.count or 0
-
-    tier_label = {"free": "Gratis", "personal": "Pessoal", "professional": "Profissional", "business": "Empresarial"}
-
-    text = (
-        f"*Seu Alfred*\n\n"
-        f"Plano: *{tier_label.get(tier, tier)}*\n\n"
-        f"Contatos: {contacts}/{limits['max_contacts']}\n"
-        f"Mensagens hoje: {daily_msgs}/{limits['max_messages_day']}\n"
-        f"Memorias: {memories}/{limits['max_memories']}\n"
-        f"Gasto mensal: ${monthly_spend:.2f} / ${limits['budget_usd']:.2f}\n"
-        f"Voz: {'Sim' if limits['voice'] else 'Nao'}"
-    )
-
+    user_id = user_result.data["id"]
+    text = await build_status_text(user_id)
     await update.message.reply_text(text, parse_mode="Markdown")
 
 

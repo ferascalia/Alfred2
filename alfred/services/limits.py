@@ -7,6 +7,13 @@ from alfred.services.usage import get_user_daily_messages, get_user_monthly_spen
 
 log = structlog.get_logger()
 
+TIER_LABELS: dict[str, str] = {
+    "free": "Grátis",
+    "personal": "Pessoal",
+    "professional": "Profissional",
+    "business": "Empresarial",
+}
+
 TIER_LIMITS: dict[str, dict] = {
     "free": {
         "max_contacts": 25,
@@ -50,6 +57,42 @@ async def get_user_tier(user_id: str) -> str:
         return result.data["tier"] if result.data else "free"
     except Exception:
         return "free"
+
+
+async def build_status_text(user_id: str) -> str:
+    db = get_db()
+    tier = await get_user_tier(user_id)
+    limits = get_limits(tier)
+
+    daily_msgs = await get_user_daily_messages(user_id)
+    monthly_spend = await get_user_monthly_spend(user_id)
+
+    contact_count = (
+        db.table("contacts")
+        .select("id", count="exact")
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .execute()
+    )
+    contacts = contact_count.count or 0
+
+    memory_count = (
+        db.table("memories")
+        .select("id", count="exact")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    memories = memory_count.count or 0
+
+    return (
+        f"*Seu Alfred*\n\n"
+        f"Plano: *{TIER_LABELS.get(tier, tier)}*\n\n"
+        f"Contatos: {contacts}/{limits['max_contacts']}\n"
+        f"Mensagens hoje: {daily_msgs}/{limits['max_messages_day']}\n"
+        f"Memórias: {memories}/{limits['max_memories']}\n"
+        f"Gasto mensal: ${monthly_spend:.2f} / ${limits['budget_usd']:.2f}\n"
+        f"Voz: {'Sim' if limits['voice'] else 'Não'}"
+    )
 
 
 async def check_message_limit(user_id: str) -> tuple[bool, str]:

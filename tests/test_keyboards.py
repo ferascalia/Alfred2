@@ -52,6 +52,21 @@ def test_nudge_keyboard_is_signed() -> None:
         assert data.startswith("nudge:")
 
 
+def test_onboarding_keyboard_has_four_buttons() -> None:
+    from alfred.bot.keyboards import onboarding_keyboard
+
+    kb = onboarding_keyboard()
+    buttons = [btn for row in kb.inline_keyboard for btn in row]
+    assert len(buttons) == 4
+    datas = [verify_callback(btn.callback_data) for btn in buttons]
+    assert "onboard:try_contact" in datas
+    assert "onboard:examples" in datas
+    assert "onboard:import" in datas
+    assert "onboard:status" in datas
+    for btn in buttons:
+        assert len(btn.callback_data.encode()) <= 64
+
+
 def test_callback_data_within_64_byte_limit() -> None:
     from alfred.bot.keyboards import nudge_keyboard
 

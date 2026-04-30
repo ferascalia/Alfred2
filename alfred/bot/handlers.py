@@ -105,7 +105,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     db = get_db()
 
-    db.table("users").upsert(
+    result = db.table("users").upsert(
         {
             "telegram_id": tg_user.id,
             "name": tg_user.full_name,
@@ -117,14 +117,72 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     log.info("user.start", telegram_id=tg_user.id, name=tg_user.full_name)
 
+    from alfred.bot.keyboards import onboarding_keyboard
+    from alfred.services.limits import TIER_LABELS, get_limits
+
+    user_tier = result.data[0].get("tier", "free") if result.data else "free"
+    limits = get_limits(user_tier)
+    tier_label = TIER_LABELS.get(user_tier, user_tier)
+
     await update.message.reply_text(
-        f"Olá, {tg_user.first_name}!\n\n"
-        "Sou o **Alfred**, seu assistente de relacionamentos.\n\n"
-        "Estou aqui para ajudar você a manter e aprofundar suas conexões — "
-        "amigos, clientes, colegas — sem deixar ninguém cair no esquecimento.\n\n"
-        "Pode começar me contando sobre alguém que você encontrou recentemente "
-        "ou perguntar o que precisa. Estou ouvindo.\n\n"
-        "Use /status para ver seu plano e limites.",
+        f"Olá, {tg_user.first_name}. Sou o *Alfred*, seu mordomo pessoal "
+        f"de relacionamentos.\n\n"
+        f"Minha missão: garantir que você nunca esqueça de manter "
+        f"contato com as pessoas que importam — clientes, parceiros, "
+        f"amigos, família.",
+        parse_mode="Markdown",
+    )
+
+    await asyncio.sleep(1.5)
+
+    await update.message.reply_text(
+        "Eis o que posso fazer pelo senhor:\n\n"
+        "*Contatos* — Cadastro e organizo informações sobre suas conexões\n"
+        "*Memórias* — Guardo detalhes importantes (gostos, empresa, cargo)\n"
+        "*Lembretes* — Aviso quando é hora de falar com alguém\n"
+        "*Rascunhos* — Escrevo mensagens personalizadas para você enviar\n"
+        "*Interações* — Registro conversas e encontros\n"
+        "*Importação* — Importo contatos via planilha (/import)\n\n"
+        f"📋 *Seu plano: {tier_label}*\n"
+        f"Até {limits['max_contacts']} contatos · "
+        f"{limits['max_messages_day']} mensagens/dia · "
+        f"{limits['max_memories']} memórias",
+        parse_mode="Markdown",
+    )
+
+    await asyncio.sleep(1.5)
+
+    await update.message.reply_text(
+        "Por onde gostaria de começar?",
+        parse_mode="Markdown",
+        reply_markup=onboarding_keyboard(),
+    )
+
+
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+
+    await update.message.reply_text(
+        "*Alfred — Referência rápida*\n\n"
+        "*Cadastrar contato:*\n"
+        '"Conheci o João da empresa X"\n\n'
+        "*Guardar informação:*\n"
+        '"O Pedro é vegetariano"\n\n'
+        "*Registrar conversa:*\n"
+        '"Falei com Maria hoje por telefone"\n\n'
+        "*Agendar lembrete:*\n"
+        '"Me lembra de falar com Ana na quinta"\n\n'
+        "*Definir frequência:*\n"
+        '"Quero falar com João a cada 15 dias"\n\n'
+        "*Rascunhar mensagem:*\n"
+        '"Escreve uma mensagem pro Carlos"\n\n'
+        "*Buscar informação:*\n"
+        '"O que eu sei sobre a Maria?"\n\n'
+        "*Outros comandos:*\n"
+        "/import — importar contatos via planilha\n"
+        "/status — ver seu plano e limites\n\n"
+        "Basta escrever naturalmente. Estou sempre ouvindo.",
         parse_mode="Markdown",
     )
 
@@ -340,6 +398,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _handle_contact_confirm_callback(query, data, context)
         return
 
+    if data.startswith("onboard:"):
+        verb = data.split(":", 1)[1]
+        await _handle_onboard_callback(query, verb)
+        return
+
     if data.startswith("import:"):
         await _handle_import_callback(query, data)
         return
@@ -497,6 +560,75 @@ async def _handle_contact_confirm_callback(
             del context.user_data[pending_key]
     else:
         await q.edit_message_text("Ação não reconhecida.")
+
+
+async def _handle_onboard_callback(query: object, verb: str) -> None:
+    from telegram import CallbackQuery
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+
+    if verb == "try_contact":
+        await q.edit_message_text(
+            "Por onde gostaria de começar?",
+            parse_mode="Markdown",
+        )
+        await q.message.reply_text(  # type: ignore[union-attr]
+            "Me conte sobre alguém que você conheceu recentemente.\n\n"
+            "Exemplos:\n"
+            '• "Conheci o Carlos da Acme, ele é diretor comercial"\n'
+            '• "A Maria trabalha no Banco X, nos conhecemos no evento Y"\n\n'
+            "Eu organizo os dados e peço sua confirmação antes de salvar.",
+            parse_mode="Markdown",
+        )
+    elif verb == "examples":
+        await q.edit_message_text(
+            "Por onde gostaria de começar?",
+            parse_mode="Markdown",
+        )
+        await q.message.reply_text(  # type: ignore[union-attr]
+            "Exemplos do que posso fazer:\n\n"
+            '*Contatos* — "Conheci a Ana do Banco X"\n'
+            '*Memórias* — "O Pedro é vegetariano e torce pro Flamengo"\n'
+            '*Interações* — "Falei com Maria hoje por telefone"\n'
+            '*Lembretes* — "Me lembra de ligar pro João na quinta"\n'
+            '*Cadência* — "Quero falar com a Ana a cada 15 dias"\n'
+            '*Rascunhos* — "Escreve uma mensagem pro Carlos"\n'
+            '*Busca* — "O que eu sei sobre a Maria?"\n'
+            "*Importação* — /import para importar planilha\n\n"
+            "Use /help para referência completa.",
+            parse_mode="Markdown",
+        )
+    elif verb == "import":
+        await q.edit_message_text(
+            "Por onde gostaria de começar?",
+            parse_mode="Markdown",
+        )
+        await q.message.reply_text(  # type: ignore[union-attr]
+            "Para importar contatos, use o comando /import.\n\n"
+            "Vou te enviar um modelo de planilha CSV. "
+            "Preencha com seus contatos e me envie de volta.",
+            parse_mode="Markdown",
+        )
+    elif verb == "status":
+        from alfred.services.limits import build_status_text
+
+        tg_user = q.from_user
+        if not tg_user:
+            return
+        db = get_db()
+        user_result = (
+            db.table("users")
+            .select("id")
+            .eq("telegram_id", tg_user.id)
+            .single()
+            .execute()
+        )
+        if not user_result.data:
+            await q.edit_message_text("Usuário não encontrado. Use /start primeiro.")
+            return
+        user_id = user_result.data["id"]
+        text = await build_status_text(user_id)
+        await q.edit_message_text(text, parse_mode="Markdown")
 
 
 async def _handle_nudge_callback(query: object, verb: str, nudge_id: str) -> None:

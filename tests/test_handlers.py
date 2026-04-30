@@ -30,16 +30,39 @@ async def test_start_handler_sends_welcome() -> None:
     context = MagicMock()
 
     fake_db = MagicMock()
-    fake_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[{"id": "u1"}])
+    fake_db.table.return_value.upsert.return_value.execute.return_value = MagicMock(
+        data=[{"id": "u1", "tier": "free"}],
+    )
 
     with patch("alfred.bot.handlers.get_db", return_value=fake_db), \
-         patch("alfred.services.access.check_access", AsyncMock(return_value=True)):
+         patch("alfred.services.access.check_access", AsyncMock(return_value=True)), \
+         patch("alfred.bot.handlers.asyncio.sleep", new_callable=AsyncMock):
         await start_handler(update, context)
+
+    assert update.message.reply_text.call_count == 3
+    first_call = update.message.reply_text.call_args_list[0][0][0]
+    assert "Alfred" in first_call
+    assert "Feras" in first_call
+    second_call = update.message.reply_text.call_args_list[1][0][0]
+    assert "Grátis" in second_call
+    assert "25 contatos" in second_call
+    third_call = update.message.reply_text.call_args_list[2]
+    assert third_call.kwargs.get("reply_markup") is not None
+
+
+@pytest.mark.asyncio
+async def test_help_handler_sends_reference() -> None:
+    from alfred.bot.handlers import help_handler
+
+    update = _make_update("/help")
+    context = MagicMock()
+
+    await help_handler(update, context)
 
     update.message.reply_text.assert_called_once()
     call_args = update.message.reply_text.call_args[0][0]
-    assert "Alfred" in call_args
-    assert "Feras" in call_args
+    assert "Referência rápida" in call_args
+    assert "Cadastrar contato" in call_args
 
 
 @pytest.mark.asyncio

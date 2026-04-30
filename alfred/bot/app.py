@@ -14,6 +14,7 @@ from alfred.bot.admin_handlers import (
 )
 from alfred.bot.handlers import (
     callback_handler,
+    help_handler,
     import_command_handler,
     import_document_handler,
     message_handler,
@@ -34,6 +35,7 @@ def build_application() -> Application:  # type: ignore[type-arg]
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("import", import_command_handler))
     app.add_handler(CommandHandler("status", status_handler))
+    app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("admin_invite", admin_invite_handler))
     app.add_handler(CommandHandler("admin_users", admin_users_handler))
     app.add_handler(CommandHandler("admin_set_tier", admin_set_tier_handler))

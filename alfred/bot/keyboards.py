@@ -53,6 +53,15 @@ def contact_action_keyboard(contact_id: str) -> InlineKeyboardMarkup:
     ])
 
 
+def onboarding_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [_btn("Cadastrar meu primeiro contato", "onboard:try_contact")],
+        [_btn("Importar contatos de planilha", "onboard:import")],
+        [_btn("Ver exemplos do que posso dizer", "onboard:examples")],
+        [_btn("Ver meu plano e limites", "onboard:status")],
+    ])
+
+
 def import_preview_keyboard(user_id: str, has_duplicates: bool = True) -> InlineKeyboardMarkup:
     if has_duplicates:
         return InlineKeyboardMarkup([
