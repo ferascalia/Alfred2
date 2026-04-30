@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from alfred.db.client import get_db
+from alfred.services.access import require_access
 
 log = structlog.get_logger()
 
@@ -187,6 +188,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+@require_access
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message or not update.message.text:
         return
@@ -227,6 +229,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+@require_access
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
@@ -316,6 +319,7 @@ async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 
+@require_access
 async def import_document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle CSV/XLSX file upload — validate, detect duplicates, show grouped preview."""
     if not update.effective_user or not update.message or not update.message.document:

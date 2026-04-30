@@ -2,6 +2,7 @@
 
 import secrets
 import string
+from functools import wraps
 
 import structlog
 
@@ -9,6 +10,11 @@ from alfred.config import settings
 from alfred.db.client import get_db
 
 log = structlog.get_logger()
+
+_ACCESS_DENIED_MSG = (
+    "O Alfred está em beta fechado no momento.\n\n"
+    "Use /start para solicitar acesso."
+)
 
 
 def _get_whitelist() -> set[int]:
@@ -21,7 +27,8 @@ def _get_whitelist() -> set[int]:
 async def check_access(telegram_id: int) -> bool:
     whitelist = _get_whitelist()
     if not whitelist:
-        return True
+        log.warning("access.no_whitelist_configured")
+        return False
     if telegram_id in whitelist:
         return True
 
@@ -31,6 +38,24 @@ async def check_access(telegram_id: int) -> bool:
         return True
 
     return False
+
+
+def require_access(handler):  # type: ignore[no-untyped-def]
+    """Decorator that blocks handlers for unauthorized Telegram users."""
+
+    @wraps(handler)
+    async def wrapper(update, context):  # type: ignore[no-untyped-def]
+        if not update.effective_user:
+            return
+        has_access = await check_access(update.effective_user.id)
+        if not has_access:
+            log.warning("access.denied", telegram_id=update.effective_user.id)
+            if update.message:
+                await update.message.reply_text(_ACCESS_DENIED_MSG)
+            return
+        return await handler(update, context)
+
+    return wrapper
 
 
 async def validate_invite_code(code: str) -> dict | None:

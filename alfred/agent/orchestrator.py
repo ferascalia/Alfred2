@@ -39,6 +39,11 @@ def _select_agent(intent: str) -> BaseAgent:
 
 async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     """Multi-agent entry point. Drop-in replacement for loop.run_agent."""
+    from alfred.services.access import check_access
+
+    if not await check_access(telegram_id):
+        return "O Alfred está em beta fechado. Use /start para solicitar acesso."
+
     user_id = await get_or_create_user(telegram_id, user_name)
 
     from alfred.services.limits import check_message_limit

@@ -2,12 +2,24 @@
 
 import hashlib
 import hmac
+import logging
 
 from alfred.config import settings
 
+_warned = False
+
 
 def _get_key() -> bytes:
-    key = settings.webhook_secret or settings.jobs_secret or "alfred-fallback"
+    global _warned
+    key = settings.webhook_secret or settings.jobs_secret
+    if not key:
+        if not _warned:
+            logging.getLogger(__name__).warning(
+                "Neither webhook_secret nor jobs_secret is set — "
+                "callback signing is insecure. Set at least one in production."
+            )
+            _warned = True
+        key = "alfred-dev-only-fallback"
     return key.encode()
 
 
