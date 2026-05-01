@@ -57,7 +57,8 @@ async def test_help_handler_sends_reference() -> None:
     update = _make_update("/help")
     context = MagicMock()
 
-    await help_handler(update, context)
+    with patch("alfred.services.access.check_access", AsyncMock(return_value=True)):
+        await help_handler(update, context)
 
     update.message.reply_text.assert_called_once()
     call_args = update.message.reply_text.call_args[0][0]

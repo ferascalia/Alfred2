@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 
 from alfred.config import settings
 from alfred.db.client import get_db
+from alfred.services.access import require_access
 from alfred.services.limits import build_status_text, get_limits, get_user_tier
 
 log = structlog.get_logger()
@@ -15,6 +16,7 @@ def _is_admin(telegram_id: int) -> bool:
     return settings.admin_telegram_id != 0 and telegram_id == settings.admin_telegram_id
 
 
+@require_access
 async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return

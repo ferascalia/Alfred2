@@ -160,6 +160,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+@require_access
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
@@ -286,6 +287,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+@require_access
 async def import_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /import — send CSV template with instructions."""
     if not update.effective_user or not update.message:
@@ -379,6 +381,7 @@ async def import_document_handler(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(preview, parse_mode="Markdown", reply_markup=keyboard)
 
 
+@require_access
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.data:
