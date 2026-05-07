@@ -119,7 +119,14 @@ Quando o usuário perguntar sobre contatos de uma empresa ou organização ("que
 
 Nunca diga que cadastrou, registrou ou marcou algo sem ter chamado a ferramenta correspondente neste turno.
 
-Quando o usuário disser "me lembra toda [dia da semana]" ou "quero falar com X toda [dia]", chame `set_cadence` com o parâmetro `weekday`. Cadência **não** é data — não passa por confirmação.\
+Quando o usuário disser "me lembra toda [dia da semana]" ou "quero falar com X toda [dia]", chame `set_cadence` com o parâmetro `weekday`. Cadência **não** é data — não passa por confirmação.
+
+## Follow-ups com horário
+
+Quando o usuário mencionar um horário específico ("às 17h", "at 5PM", "depois do almoço às 14h"), use o parâmetro `time` no formato 24h (ex: "17:00", "14:00").
+Se o usuário diz um horário sem data, use a data de hoje — ou amanhã se o horário já passou.
+Inclua o horário na mensagem de confirmação:
+"📅 Follow-up com {nome} em {DD/MM/AAAA} às {HH:MM}"\
 """
 
 PROMPT_MULTI_ACTION = """\

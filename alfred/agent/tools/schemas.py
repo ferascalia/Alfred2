@@ -269,9 +269,11 @@ ADD_MEMORY_SCHEMA: dict[str, Any] = {
 SET_FOLLOW_UP_SCHEMA: dict[str, Any] = {
     "name": "set_follow_up",
     "description": (
-        "Marca um follow-up para um contato em uma data específica. "
+        "Marca um follow-up para um contato em uma data específica, opcionalmente com horário. "
         "Use SEMPRE que o usuário mencionar um dia futuro ou prazo: 'me lembra na sexta', "
         "'marca para quarta', 'follow-up em 10 dias', 'preciso falar com ele em 2 dias'. "
+        "Se o usuário mencionar um HORÁRIO ('às 17h', 'at 5PM', '14:30'), "
+        "passe também o parâmetro 'time' no formato 24h. "
         "Calcule a data absoluta a partir de hoje (a data atual está no system prompt) "
         "e passe no formato YYYY-MM-DD. "
         "Se um create_contact foi chamado antes neste turno, use o id retornado. "
@@ -284,6 +286,7 @@ SET_FOLLOW_UP_SCHEMA: dict[str, Any] = {
             "contact_id": {"type": "string"},
             "date": {"type": "string", "description": "Data do follow-up no formato YYYY-MM-DD (ex: '2026-04-20')"},
             "note": {"type": "string", "description": "Opcional: motivo ou contexto do follow-up (ex: 'perguntar sobre o novo emprego')"},
+            "time": {"type": "string", "description": "Opcional: horário no formato 24h (ex: '17:00', '09:30'). Quando informado, Alfred envia o lembrete no horário exato."},
         },
         "required": ["contact_id", "date"],
     },
