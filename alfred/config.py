@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     calendar_sender_email: str = ""
 
+    # Google OAuth (Calendar integration)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
 
 
 settings = Settings()  # type: ignore[call-arg]

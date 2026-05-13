@@ -99,4 +99,16 @@ async def dispatch_tool(
         from alfred.services.calendar import send_calendar_invite_tool
         return await send_calendar_invite_tool(user_id=user_id, **tool_input)
 
+    if tool_name == "list_calendar_events":
+        from alfred.services.google_calendar import list_events
+        return await list_events(user_id=user_id, **tool_input)
+
+    if tool_name == "create_calendar_event":
+        from alfred.services.google_calendar import create_event
+        return await create_event(user_id=user_id, **tool_input)
+
+    if tool_name == "update_calendar_event":
+        from alfred.services.google_calendar import update_event
+        return await update_event(user_id=user_id, **tool_input)
+
     return f"Ferramenta '{tool_name}' não reconhecida."

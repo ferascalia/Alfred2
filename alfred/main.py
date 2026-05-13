@@ -42,6 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="Alfred", lifespan=lifespan)
 
+from alfred.bot.oauth_routes import router as oauth_router
+app.include_router(oauth_router)
+
 
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:

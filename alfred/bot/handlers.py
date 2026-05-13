@@ -42,6 +42,14 @@ def _has_contact_confirmation(text: str) -> bool:
     )
 
 
+def _has_calendar_confirmation(text: str) -> bool:
+    """Check if any line starts with 'Agendando:' (case-insensitive)."""
+    return any(
+        re.match(r"^\s*agendando\s*:", line, re.IGNORECASE)
+        for line in text.split("\n")
+    )
+
+
 async def _send_response_with_confirmation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -53,7 +61,22 @@ async def _send_response_with_confirmation(
     if not update.message:
         return
 
-    if _has_date_confirmation(response):
+    if _has_calendar_confirmation(response):
+        from alfred.bot.keyboards import calendar_confirm_keyboard
+
+        confirmation_id = uuid.uuid4().hex[:12]
+        if context.user_data is not None:
+            context.user_data[f"calendarconfirm:{confirmation_id}"] = {
+                "telegram_id": telegram_id,
+                "user_name": user_name,
+                "confirmation_text": response,
+            }
+        await update.message.reply_text(
+            response,
+            parse_mode="Markdown",
+            reply_markup=calendar_confirm_keyboard(confirmation_id),
+        )
+    elif _has_date_confirmation(response):
         from alfred.bot.keyboards import date_confirm_keyboard
 
         confirmation_id = uuid.uuid4().hex[:12]
@@ -85,6 +108,46 @@ async def _send_response_with_confirmation(
         )
     else:
         await update.message.reply_text(response, parse_mode="Markdown")
+
+
+@require_access
+async def connect_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /connect — show button to connect Google Calendar."""
+    if not update.effective_user or not update.message:
+        return
+
+    from alfred.bot.oauth_routes import _sign_state
+
+    tg_user = update.effective_user
+    state = _sign_state(tg_user.id)
+    connect_url = f"{settings.webhook_url}/oauth/google?telegram_id={tg_user.id}"
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Conectar Google Calendar", url=connect_url),
+    ]])
+
+    db = get_db()
+    user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
+    if user_result.data:
+        from alfred.services.oauth import has_google_integration
+        if await has_google_integration(user_result.data["id"]):
+            await update.message.reply_text(
+                "Sua agenda Google já está conectada.\n\n"
+                "Para reconectar, clique no botão abaixo.",
+                reply_markup=keyboard,
+            )
+            return
+
+    await update.message.reply_text(
+        "Conecte sua agenda Google para que eu possa:\n\n"
+        "• Ver seus compromissos\n"
+        "• Criar eventos diretamente\n"
+        "• Atualizar reuniões existentes\n\n"
+        "Clique no botão abaixo para autorizar:",
+        reply_markup=keyboard,
+    )
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -181,7 +244,12 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         '"Escreve uma mensagem pro Carlos"\n\n'
         "*Buscar informação:*\n"
         '"O que eu sei sobre a Maria?"\n\n'
+        "*Agenda Google:*\n"
+        '"O que tenho na agenda amanhã?"\n\n'
+        "*Agendar reunião:*\n"
+        '"Marca reunião com João quinta às 15h"\n\n'
         "*Outros comandos:*\n"
+        "/connect — conectar agenda Google\n"
         "/import — importar contatos via planilha\n"
         "/status — ver seu plano e limites\n\n"
         "Basta escrever naturalmente. Estou sempre ouvindo.",
@@ -397,6 +465,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text("Ação expirada ou inválida.")
         return
 
+    if data.startswith("calendarconfirm:"):
+        await _handle_calendar_confirm_callback(query, data, context)
+        return
+
     if data.startswith("dateconfirm:"):
         await _handle_date_confirm_callback(query, data, context)
         return
@@ -497,6 +569,81 @@ async def _handle_date_confirm_callback(
             )
 
         # Limpa dados pendentes — próxima mensagem será processada normalmente
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+    else:
+        await q.edit_message_text("Ação não reconhecida.")
+
+
+async def _handle_calendar_confirm_callback(
+    query: object, data: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle calendarconfirm:yes:{id} and calendarconfirm:edit:{id} callbacks."""
+    from telegram import CallbackQuery
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        await q.edit_message_text("Ação inválida.")
+        return
+
+    verb, confirmation_id = parts[1], parts[2]
+    pending_key = f"calendarconfirm:{confirmation_id}"
+    pending = (context.user_data or {}).get(pending_key)
+
+    if not pending:
+        await q.edit_message_text(
+            "⏳ Essa confirmação expirou. Me diga de novo o que quer agendar."
+        )
+        return
+
+    from alfred.agent.orchestrator import run_agent
+
+    if verb == "yes":
+        original_text = pending["confirmation_text"]
+        await q.edit_message_text(f"{original_text}\n\n✅ _Confirmado_", parse_mode="Markdown")
+
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        typing_task = None
+        if chat_id:
+            async def keep_typing() -> None:
+                try:
+                    while True:
+                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                        await asyncio.sleep(4)
+                except asyncio.CancelledError:
+                    pass
+
+            typing_task = context.application.create_task(keep_typing())
+
+        try:
+            response = await run_agent(
+                telegram_id=pending["telegram_id"],
+                user_name=pending["user_name"],
+                message="[CONFIRMAÇÃO APROVADA] Confirmo o agendamento. Crie o evento na agenda agora.",
+            )
+        finally:
+            if typing_task:
+                typing_task.cancel()
+                await asyncio.sleep(0)
+
+        if chat_id:
+            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode="Markdown")
+
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+
+    elif verb == "edit":
+        original_text = pending["confirmation_text"]
+        await q.edit_message_text(f"{original_text}\n\n✏️ _Correção solicitada_", parse_mode="Markdown")
+
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        if chat_id:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Sem problemas! Me diga o que quer corrigir — horário, título ou participantes.",
+            )
+
         if context.user_data and pending_key in context.user_data:
             del context.user_data[pending_key]
     else:

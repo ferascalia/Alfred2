@@ -378,8 +378,97 @@ SEND_CALENDAR_INVITE_SCHEMA: dict[str, Any] = {
 
 CALENDAR_TOOLS: list[dict[str, Any]] = [SEND_CALENDAR_INVITE_SCHEMA]
 
+# ─── Google Calendar tools ──────────────────────────────────────────
+
+LIST_CALENDAR_EVENTS_SCHEMA: dict[str, Any] = {
+    "name": "list_calendar_events",
+    "description": (
+        "Lista eventos da agenda Google do usuário em um período. "
+        "Use quando o usuário perguntar sobre compromissos, reuniões ou eventos "
+        "da agenda ('o que tenho amanhã?', 'minha agenda da semana', 'tenho reunião quinta?'). "
+        "Requer que o usuário tenha conectado a agenda via /connect."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "start_date": {
+                "type": "string",
+                "description": "Data de início no formato YYYY-MM-DD",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "Data final no formato YYYY-MM-DD (opcional, padrão +7 dias)",
+            },
+            "query": {
+                "type": "string",
+                "description": "Busca por título do evento (opcional)",
+            },
+        },
+        "required": ["start_date"],
+    },
+}
+
+CREATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
+    "name": "create_calendar_event",
+    "description": (
+        "Cria um evento na agenda Google do usuário. "
+        "Use quando o usuário pedir para agendar reunião, compromisso ou evento. "
+        "IMPORTANTE: use o formato 'Agendando:' para confirmar com o usuário antes de executar. "
+        "Requer que o usuário tenha conectado a agenda via /connect."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Título do evento"},
+            "start_datetime": {
+                "type": "string",
+                "description": "Data/hora de início em ISO 8601 (ex: '2026-05-15T14:00:00')",
+            },
+            "end_datetime": {
+                "type": "string",
+                "description": "Data/hora de término em ISO 8601 (ex: '2026-05-15T15:00:00')",
+            },
+            "description": {"type": "string", "description": "Notas do evento (opcional)"},
+            "location": {"type": "string", "description": "Local ou link de reunião (opcional)"},
+            "attendees": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Emails dos participantes (opcional)",
+            },
+        },
+        "required": ["title", "start_datetime", "end_datetime"],
+    },
+}
+
+UPDATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
+    "name": "update_calendar_event",
+    "description": (
+        "Atualiza um evento existente na agenda Google. "
+        "Use quando o usuário pedir para mudar horário, local ou detalhes de um evento. "
+        "Primeiro use list_calendar_events para encontrar o event_id."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "event_id": {"type": "string", "description": "ID do evento (obtido via list_calendar_events)"},
+            "fields": {
+                "type": "object",
+                "description": "Campos a atualizar: title, start_datetime, end_datetime, description, location, attendees",
+            },
+        },
+        "required": ["event_id", "fields"],
+    },
+}
+
+GOOGLE_CALENDAR_TOOLS: list[dict[str, Any]] = [
+    LIST_CALENDAR_EVENTS_SCHEMA,
+    CREATE_CALENDAR_EVENT_SCHEMA,
+    UPDATE_CALENDAR_EVENT_SCHEMA,
+]
+
 # ─── Flat list (backwards-compatible with loop.py) ─────────────────
 
 ALL_TOOL_SCHEMAS: list[dict[str, Any]] = (
-    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + DRAFT_TOOLS + CALENDAR_TOOLS
+    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS
+    + DRAFT_TOOLS + CALENDAR_TOOLS + GOOGLE_CALENDAR_TOOLS
 )
