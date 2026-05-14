@@ -377,3 +377,24 @@ async def test_google_calendar_delete_event_success():
         result = await provider.delete_event("user-1", event_id="event123")
 
     assert "removido" in result
+
+
+# ---------------------------------------------------------------------------
+# OAuth route tests
+# ---------------------------------------------------------------------------
+
+def test_sign_state_with_provider():
+    from alfred.bot.oauth_routes import _sign_state, _verify_state
+
+    signed = _sign_state(12345, "google_calendar")
+    assert "google_calendar:12345" in signed
+    provider, tg_id = _verify_state(signed)
+    assert provider == "google_calendar"
+    assert tg_id == 12345
+
+
+def test_verify_state_invalid():
+    from alfred.bot.oauth_routes import _verify_state
+
+    assert _verify_state("invalid") == (None, None)
+    assert _verify_state("google_calendar:12345.badhmac") == (None, None)
