@@ -10,7 +10,7 @@ from alfred.agent.prompt_sections import (
     PROMPT_CLOSING,
     PROMPT_QUERY,
 )
-from alfred.agent.tools.schemas import READ_TOOLS
+from alfred.agent.tools.schemas import LIST_CALENDAR_EVENTS_SCHEMA, READ_TOOLS
 
 _DATETIME_SUFFIX = (
     "\n\n## Data e hora atual\nHoje é {current_date}. "
@@ -25,7 +25,7 @@ class QueryAgent(BaseAgent):
     guardrail_config = GuardrailConfig()
 
     def get_tools(self) -> list[dict[str, Any]]:
-        return list(READ_TOOLS)
+        return list(READ_TOOLS) + [LIST_CALENDAR_EVENTS_SCHEMA]
 
     def build_prompt(self, ctx: AgentContext) -> str:
         sections = [PROMPT_BASE, PROMPT_QUERY, PROMPT_CLOSING]

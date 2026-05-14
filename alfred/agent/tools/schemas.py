@@ -269,9 +269,11 @@ ADD_MEMORY_SCHEMA: dict[str, Any] = {
 SET_FOLLOW_UP_SCHEMA: dict[str, Any] = {
     "name": "set_follow_up",
     "description": (
-        "Marca um follow-up para um contato em uma data específica. "
+        "Marca um follow-up para um contato em uma data específica, opcionalmente com horário. "
         "Use SEMPRE que o usuário mencionar um dia futuro ou prazo: 'me lembra na sexta', "
         "'marca para quarta', 'follow-up em 10 dias', 'preciso falar com ele em 2 dias'. "
+        "Se o usuário mencionar um HORÁRIO ('às 17h', 'at 5PM', '14:30'), "
+        "passe também o parâmetro 'time' no formato 24h. "
         "Calcule a data absoluta a partir de hoje (a data atual está no system prompt) "
         "e passe no formato YYYY-MM-DD. "
         "Se um create_contact foi chamado antes neste turno, use o id retornado. "
@@ -284,6 +286,7 @@ SET_FOLLOW_UP_SCHEMA: dict[str, Any] = {
             "contact_id": {"type": "string"},
             "date": {"type": "string", "description": "Data do follow-up no formato YYYY-MM-DD (ex: '2026-04-20')"},
             "note": {"type": "string", "description": "Opcional: motivo ou contexto do follow-up (ex: 'perguntar sobre o novo emprego')"},
+            "time": {"type": "string", "description": "Opcional: horário no formato 24h (ex: '17:00', '09:30'). Quando informado, Alfred envia o lembrete no horário exato."},
         },
         "required": ["contact_id", "date"],
     },
@@ -375,8 +378,98 @@ SEND_CALENDAR_INVITE_SCHEMA: dict[str, Any] = {
 
 CALENDAR_TOOLS: list[dict[str, Any]] = [SEND_CALENDAR_INVITE_SCHEMA]
 
+# ─── Calendar integration tools ──────────────────────────────────────
+
+LIST_CALENDAR_EVENTS_SCHEMA: dict[str, Any] = {
+    "name": "list_calendar_events",
+    "description": (
+        "Lista eventos da agenda do usuário em um período. "
+        "Use quando o usuário perguntar sobre compromissos, reuniões ou eventos "
+        "da agenda ('o que tenho amanhã?', 'minha agenda da semana', 'tenho reunião quinta?'). "
+        "Requer que o usuário tenha conectado a agenda via /connect."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "start_date": {
+                "type": "string",
+                "description": "Data de início no formato YYYY-MM-DD",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "Data final no formato YYYY-MM-DD (opcional, padrão +7 dias)",
+            },
+            "query": {
+                "type": "string",
+                "description": "Busca por título do evento (opcional)",
+            },
+        },
+        "required": ["start_date"],
+    },
+}
+
+CREATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
+    "name": "create_calendar_event",
+    "description": (
+        "Cria um evento na agenda do usuário. "
+        "Use quando o usuário pedir para agendar reunião, compromisso ou evento. "
+        "IMPORTANTE: use o formato 'Agendando:' para confirmar com o usuário antes de executar. "
+        "Requer que o usuário tenha conectado a agenda via /connect."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Título do evento"},
+            "start_datetime": {
+                "type": "string",
+                "description": "Data/hora de início em ISO 8601 (ex: '2026-05-15T14:00:00')",
+            },
+            "end_datetime": {
+                "type": "string",
+                "description": "Data/hora de término em ISO 8601 (ex: '2026-05-15T15:00:00')",
+            },
+            "description": {"type": "string", "description": "Notas do evento (opcional)"},
+            "location": {"type": "string", "description": "Local ou link de reunião (opcional)"},
+            "attendees": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Emails dos participantes (opcional)",
+            },
+        },
+        "required": ["title", "start_datetime", "end_datetime"],
+    },
+}
+
+UPDATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
+    "name": "update_calendar_event",
+    "description": (
+        "Atualiza um evento existente na agenda. "
+        "Use quando o usuário pedir para mudar horário, local ou detalhes de um evento. "
+        "Primeiro use list_calendar_events para encontrar o event_id."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "event_id": {"type": "string", "description": "ID do evento (obtido via list_calendar_events)"},
+            "fields": {
+                "type": "object",
+                "description": "Campos a atualizar: title, start_datetime, end_datetime, description, location, attendees",
+            },
+        },
+        "required": ["event_id", "fields"],
+    },
+}
+
+CALENDAR_INTEGRATION_TOOLS: list[dict[str, Any]] = [
+    LIST_CALENDAR_EVENTS_SCHEMA,
+    CREATE_CALENDAR_EVENT_SCHEMA,
+    UPDATE_CALENDAR_EVENT_SCHEMA,
+]
+GOOGLE_CALENDAR_TOOLS = CALENDAR_INTEGRATION_TOOLS
+
 # ─── Flat list (backwards-compatible with loop.py) ─────────────────
 
 ALL_TOOL_SCHEMAS: list[dict[str, Any]] = (
-    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS + DRAFT_TOOLS + CALENDAR_TOOLS
+    READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS
+    + DRAFT_TOOLS + CALENDAR_TOOLS + CALENDAR_INTEGRATION_TOOLS
 )

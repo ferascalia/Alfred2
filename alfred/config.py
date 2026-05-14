@@ -32,9 +32,15 @@ class Settings(BaseSettings):
     # Railway
     railway_api_token: str = ""
 
-    # Admin alerts
-    admin_telegram_id: int = 0
+    # Admin alerts (comma-separated Telegram IDs)
+    admin_telegram_id: str = ""
     anthropic_monthly_budget_usd: float = 5.0
+
+    @property
+    def admin_telegram_ids(self) -> list[int]:
+        if not self.admin_telegram_id:
+            return []
+        return [int(x.strip()) for x in self.admin_telegram_id.split(",") if x.strip()]
 
     # Multi-tenant access control
     allowed_telegram_ids: str = ""
@@ -43,6 +49,10 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     calendar_sender_email: str = ""
 
+    # Google OAuth (Calendar integration)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
 
 
 settings = Settings()  # type: ignore[call-arg]

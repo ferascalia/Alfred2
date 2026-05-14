@@ -286,9 +286,13 @@ async def set_cadence(user_id: str, contact_id: str, days: int = 7, weekday: int
     return f"Cadência de **{name}** definida para {days} dias."
 
 
-async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | None = None) -> str:
-    """Set a specific follow-up date for a contact (overrides next_nudge_at)."""
-    from datetime import date as date_type
+async def set_follow_up(
+    user_id: str, contact_id: str, date: str,
+    note: str | None = None, time: str | None = None,
+) -> str:
+    """Set a specific follow-up date (and optional time) for a contact."""
+    from datetime import date as date_type, datetime
+    from zoneinfo import ZoneInfo
 
     try:
         parsed = date_type.fromisoformat(date)
@@ -312,15 +316,29 @@ async def set_follow_up(user_id: str, contact_id: str, date: str, note: str | No
         )
 
     name = contact_result.data["display_name"]
-    # Set next_nudge_at to midnight UTC on the target date — the 08:00 UTC scan will catch it
-    next_nudge_at = f"{parsed.isoformat()}T00:00:00+00:00"
 
-    update_data: dict[str, object] = {"next_nudge_at": next_nudge_at, "follow_up_note": note}
+    if time:
+        user_row = db.table("users").select("timezone").eq("id", user_id).single().execute()
+        tz = ZoneInfo(user_row.data.get("timezone", "America/Sao_Paulo"))
+        hour, minute = map(int, time.split(":"))
+        local_dt = datetime(parsed.year, parsed.month, parsed.day, hour, minute, tzinfo=tz)
+        utc_dt = local_dt.astimezone(ZoneInfo("UTC"))
+        next_nudge_at = utc_dt.isoformat()
+        update_data: dict[str, object] = {
+            "next_nudge_at": next_nudge_at, "follow_up_note": note, "time_specific": True,
+        }
+    else:
+        next_nudge_at = f"{parsed.isoformat()}T00:00:00+00:00"
+        update_data = {
+            "next_nudge_at": next_nudge_at, "follow_up_note": note, "time_specific": False,
+        }
+
     db.table("contacts").update(update_data).eq("id", contact_id).eq("user_id", user_id).execute()
 
-    log.info("follow_up.set", user_id=user_id, contact_id=contact_id, date=date)
+    log.info("follow_up.set", user_id=user_id, contact_id=contact_id, date=date, time=time)
     note_str = f" — motivo: {note}" if note else ""
-    return f"Follow-up marcado para **{name}** no dia {parsed.strftime('%d/%m/%Y')}{note_str}."
+    time_str = f" às {time}" if time else ""
+    return f"Follow-up marcado para **{name}** no dia {parsed.strftime('%d/%m/%Y')}{time_str}{note_str}."
 
 
 async def list_upcoming_follow_ups(user_id: str, until_date: str) -> str:

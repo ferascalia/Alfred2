@@ -9,15 +9,16 @@ log = structlog.get_logger()
 
 
 async def alert_admin(message: str) -> None:
-    if not settings.admin_telegram_id:
+    if not settings.admin_telegram_ids:
         log.warning("alert_admin.no_admin_id")
         return
     try:
         bot = Bot(token=settings.telegram_bot_token)
-        await bot.send_message(
-            chat_id=settings.admin_telegram_id,
-            text=message,
-            parse_mode="Markdown",
-        )
+        for admin_id in settings.admin_telegram_ids:
+            await bot.send_message(
+                chat_id=admin_id,
+                text=message,
+                parse_mode="Markdown",
+            )
     except Exception:
         log.exception("alert_admin.failed")

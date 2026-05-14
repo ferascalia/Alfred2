@@ -1,6 +1,6 @@
 [project]
 name = "alfred"
-version = "0.1.0"
+version = "0.2.1"
 description = "Alfred — Agente de Relacionamento de IA"
 requires-python = ">=3.12"
 dependencies = [
@@ -17,6 +17,9 @@ dependencies = [
     "dateparser>=1.4.0",
     "openpyxl>=3.1",
     "resend>=2.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-api-python-client>=2.0",
 ]
 
 [dependency-groups]

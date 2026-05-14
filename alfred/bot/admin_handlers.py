@@ -13,7 +13,7 @@ log = structlog.get_logger()
 
 
 def _is_admin(telegram_id: int) -> bool:
-    return settings.admin_telegram_id != 0 and telegram_id == settings.admin_telegram_id
+    return telegram_id in settings.admin_telegram_ids
 
 
 @require_access
