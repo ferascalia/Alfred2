@@ -11,6 +11,7 @@ from alfred.agent.prompt_sections import (
     PROMPT_CLOSING,
     PROMPT_DATE_CONFIRM,
     PROMPT_SCHEDULING,
+    PROMPT_SCHEDULING_DISAMBIGUATION,
 )
 from alfred.agent.tools.schemas import (
     ACTIVITY_WRITE_TOOLS,
@@ -52,5 +53,5 @@ class ActivityAgent(BaseAgent):
         ]
 
     def build_prompt(self, ctx: AgentContext) -> str:
-        sections = [PROMPT_BASE, PROMPT_ACTION, PROMPT_DATE_CONFIRM, PROMPT_SCHEDULING, PROMPT_CLOSING]
+        sections = [PROMPT_BASE, PROMPT_ACTION, PROMPT_DATE_CONFIRM, PROMPT_SCHEDULING, PROMPT_SCHEDULING_DISAMBIGUATION, PROMPT_CLOSING]
         return "\n".join(sections) + _DATETIME_SUFFIX.format(current_date=ctx.current_date)

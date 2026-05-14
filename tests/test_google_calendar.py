@@ -51,7 +51,7 @@ def test_query_agent_has_list_calendar_events():
     assert "list_calendar_events" in tool_names
 
 
-def test_prompt_no_google_calendar_hardcoded():
+def test_prompt_has_calendar_markers():
     from alfred.agent.agents.activity import ActivityAgent
     from alfred.agent.context import AgentContext
 
@@ -61,9 +61,13 @@ def test_prompt_no_google_calendar_hardcoded():
         message="test", current_date="2026-05-14", is_confirmation=False,
     )
     prompt = agent.build_prompt(ctx)
-    assert "Google Calendar" not in prompt
+    # Disambiguation section intentionally names Google Calendar as the provider
+    assert "Google Calendar" in prompt
     assert "list_calendar_events" in prompt
     assert "Agendando:" in prompt
+    # Disambiguation markers must be present
+    assert "Escolha como agendar:" in prompt
+    assert "ESCOLHA AGENDA: calendar" in prompt
 
 
 def test_has_calendar_confirmation():

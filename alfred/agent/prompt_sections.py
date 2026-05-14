@@ -242,6 +242,55 @@ Se o usuário conectou sua agenda via /connect, você pode:
 - Chame `list_calendar_events` diretamente — sem confirmação necessária para leitura.
 - Se a ferramenta retornar "agenda não conectada", sugira /connect.
 
+**Nota sobre emails:** Contatos não têm campo email na tabela. Emails são armazenados como memórias do tipo `professional`. Antes de criar um evento com convidado, use `search_memories(contact_id, query="email")` para buscar. Se não encontrar, pergunte ao usuário e salve com `add_memory(contact_id, content="Email: x@y.com", kind="professional")`.
+
 **Regra:** `Agendando:` é um marcador reservado para criação/atualização de eventos na agenda. Não confunda com `Confirmando:` (que é para datas de follow-ups/interações).\
+"""
+
+PROMPT_SCHEDULING_DISAMBIGUATION = """\
+
+## Disambiguação: agenda vs lembrete
+
+Quando o usuário pede para agendar/marcar algo com um contato e a intenção não é clara (Google Calendar vs lembrete interno), você DEVE perguntar antes de agir.
+
+### Quando ir DIRETO para Google Calendar (sem perguntar)
+Palavras que indicam calendar: "agenda reunião", "cria evento", "meeting", "appointment", "bloqueia na agenda", "marca na agenda"
+
+→ Vá direto para o fluxo "Agendando:" (já documentado acima).
+
+### Quando ir DIRETO para follow-up/lembrete (sem perguntar)
+Palavras que indicam lembrete: "me lembra", "follow-up", "cobrar", "lembrete", "nudge"
+
+→ Vá direto para o fluxo "Confirmando:" (já documentado acima).
+
+### Quando PERGUNTAR (ambiguidade)
+Frases como "me marca com X às 17h", "marca aí", "anota aí" — sem sinal claro de calendar ou lembrete.
+
+→ Responda APENAS com texto começando com "Escolha como agendar:" seguido dos detalhes:
+
+> Escolha como agendar:
+> • Hugo Oliveira — 14/05/2026 (quarta) às 17:00
+
+O sistema adicionará botões 📅 Google Calendar | 🔔 Lembrete | ✏️ Corrigir automaticamente.
+
+**Não use "Escolha como agendar:" para mais nada.** É um marcador reservado.
+
+### Após o usuário escolher Google Calendar (via [ESCOLHA AGENDA: calendar])
+
+1. Verifique se a agenda está conectada — chame `list_calendar_events` ou similar. Se retornar "não conectada", responda: "Sua agenda Google não está conectada. Use /connect para vincular."
+2. Busque o email do contato — chame `search_memories(contact_id, query="email")`. Se não encontrar, pergunte: "Qual o email do {nome}? Preciso dele para enviar o convite."
+3. Quando o usuário fornecer o email, salve como memória: `add_memory(contact_id, content="Email: x@y.com", kind="professional")`.
+4. Emita "Agendando:" com os detalhes (fluxo normal de calendar).
+5. Após o evento ser criado com sucesso, pergunte se quer lembrete no Telegram: responda com texto contendo "Lembrete no Telegram?" O sistema adicionará botões ✅ Sim | ❌ Só o Calendar.
+
+### Após o usuário escolher Lembrete (via [ESCOLHA AGENDA: followup])
+
+→ Emita "Confirmando:" com a data (fluxo normal de follow-up). Nenhum passo extra.
+
+### Após [LEMBRETE TAMBÉM: sim]
+
+→ Chame `set_follow_up` com a mesma data e horário do evento que acabou de ser criado. Use o `Confirmando:` padrão — o guardrail vai pedir confirmação.
+
+**Regra:** na dúvida, pergunte. Uma pergunta extra é melhor que criar o tipo errado.\
 """
 
