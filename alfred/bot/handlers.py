@@ -524,6 +524,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _handle_calendar_confirm_callback(query, data, context)
         return
 
+    if data.startswith("schedulechoice:"):
+        await _handle_scheduling_choice_callback(query, data, context)
+        return
+
+    if data.startswith("reminderalso:"):
+        await _handle_reminder_followup_callback(query, data, context)
+        return
+
     if data.startswith("dateconfirm:"):
         await _handle_date_confirm_callback(query, data, context)
         return
@@ -697,6 +705,166 @@ async def _handle_calendar_confirm_callback(
             await context.bot.send_message(
                 chat_id=chat_id,
                 text="Sem problemas! Me diga o que quer corrigir — horário, título ou participantes.",
+            )
+
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+    else:
+        await q.edit_message_text("Ação não reconhecida.")
+
+
+async def _handle_scheduling_choice_callback(
+    query: object, data: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle schedulechoice:calendar|followup|edit:{id} callbacks."""
+    from telegram import CallbackQuery
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        await q.edit_message_text("Ação inválida.")
+        return
+
+    verb, confirmation_id = parts[1], parts[2]
+    pending_key = f"schedulechoice:{confirmation_id}"
+    pending = (context.user_data or {}).get(pending_key)
+
+    if not pending:
+        await q.edit_message_text(
+            "⏳ Essa escolha expirou. Me diga de novo o que quer agendar."
+        )
+        return
+
+    from alfred.agent.orchestrator import run_agent
+
+    if verb == "edit":
+        original_text = pending["confirmation_text"]
+        await q.edit_message_text(f"{original_text}\n\n✏️ _Correção solicitada_", parse_mode="Markdown")
+
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        if chat_id:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Sem problemas! Me diga o que quer corrigir — data, pessoa ou ação.",
+            )
+
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+        return
+
+    choice_markers = {
+        "calendar": "[ESCOLHA AGENDA: calendar]",
+        "followup": "[ESCOLHA AGENDA: followup]",
+    }
+    choice_marker = choice_markers.get(verb)
+    if not choice_marker:
+        await q.edit_message_text("Ação não reconhecida.")
+        return
+
+    emoji = "📅" if verb == "calendar" else "🔔"
+    label = "Google Calendar" if verb == "calendar" else "Lembrete"
+    original_text = pending["confirmation_text"]
+    await q.edit_message_text(
+        f"{original_text}\n\n{emoji} _{label}_", parse_mode="Markdown"
+    )
+
+    chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+    typing_task = None
+    if chat_id:
+        async def keep_typing() -> None:
+            try:
+                while True:
+                    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                    await asyncio.sleep(4)
+            except asyncio.CancelledError:
+                pass
+
+        typing_task = context.application.create_task(keep_typing())
+
+    try:
+        response = await run_agent(
+            telegram_id=pending["telegram_id"],
+            user_name=pending["user_name"],
+            message=f"{choice_marker} {pending['confirmation_text']}",
+        )
+    finally:
+        if typing_task:
+            typing_task.cancel()
+            await asyncio.sleep(0)
+
+    if chat_id:
+        await context.bot.send_message(
+            chat_id=chat_id, text=response, parse_mode="Markdown"
+        )
+
+    if context.user_data and pending_key in context.user_data:
+        del context.user_data[pending_key]
+
+
+async def _handle_reminder_followup_callback(
+    query: object, data: str, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle reminderalso:yes|no:{id} callbacks."""
+    from telegram import CallbackQuery
+
+    q: CallbackQuery = query  # type: ignore[assignment]
+    parts = data.split(":", 2)
+    if len(parts) < 3:
+        await q.edit_message_text("Ação inválida.")
+        return
+
+    verb, confirmation_id = parts[1], parts[2]
+    pending_key = f"reminderalso:{confirmation_id}"
+    pending = (context.user_data or {}).get(pending_key)
+
+    if not pending:
+        await q.edit_message_text("⏳ Essa escolha expirou.")
+        return
+
+    original_text = pending["confirmation_text"]
+
+    if verb == "no":
+        await q.edit_message_text(
+            f"{original_text}\n\n❌ _Só Calendar_", parse_mode="Markdown"
+        )
+        if context.user_data and pending_key in context.user_data:
+            del context.user_data[pending_key]
+        return
+
+    if verb == "yes":
+        await q.edit_message_text(
+            f"{original_text}\n\n✅ _Lembrete ativado_", parse_mode="Markdown"
+        )
+
+        chat_id = q.message.chat_id if q.message else None  # type: ignore[union-attr]
+        typing_task = None
+        if chat_id:
+            async def keep_typing() -> None:
+                try:
+                    while True:
+                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+                        await asyncio.sleep(4)
+                except asyncio.CancelledError:
+                    pass
+
+            typing_task = context.application.create_task(keep_typing())
+
+        from alfred.agent.orchestrator import run_agent
+
+        try:
+            response = await run_agent(
+                telegram_id=pending["telegram_id"],
+                user_name=pending["user_name"],
+                message="[LEMBRETE TAMBÉM: sim] Crie também um follow-up/lembrete interno com a mesma data e horário do evento que acabou de ser criado.",
+            )
+        finally:
+            if typing_task:
+                typing_task.cancel()
+                await asyncio.sleep(0)
+
+        if chat_id:
+            await context.bot.send_message(
+                chat_id=chat_id, text=response, parse_mode="Markdown"
             )
 
         if context.user_data and pending_key in context.user_data:

@@ -133,6 +133,52 @@ def test_has_reminder_followup_rejects_unrelated() -> None:
     assert not _has_reminder_followup("Confirmando: Hugo — 14/05/2026")
 
 
+@pytest.mark.asyncio
+async def test_callback_handler_routes_schedulechoice() -> None:
+    """Verify callback_handler dispatches schedulechoice: callbacks."""
+    from alfred.bot.handlers import callback_handler
+
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.data = "does-not-matter"
+    query.edit_message_text = AsyncMock()
+    query.message = MagicMock()
+    query.message.chat_id = 999
+    query.from_user = MagicMock()
+    query.from_user.id = 123
+
+    update = MagicMock()
+    update.callback_query = query
+
+    context = MagicMock()
+    context.user_data = {}
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock()
+    context.bot.send_chat_action = AsyncMock()
+    mock_task = MagicMock()
+    mock_task.cancel = MagicMock()
+    context.application = MagicMock()
+    context.application.create_task = MagicMock(return_value=mock_task)
+
+    from alfred.bot.signing import sign_callback
+    signed = sign_callback("schedulechoice:calendar:testid123")
+    query.data = signed
+
+    context.user_data["schedulechoice:testid123"] = {
+        "telegram_id": 123,
+        "user_name": "Test",
+        "confirmation_text": "Escolha como agendar:\n• Hugo — 14/05/2026 às 17:00",
+    }
+
+    with patch("alfred.services.access.check_access", AsyncMock(return_value=True)), \
+         patch("alfred.bot.handlers.asyncio.sleep", new_callable=AsyncMock), \
+         patch("alfred.agent.orchestrator.run_agent", AsyncMock(return_value="Agendando:\n• Hugo — 14/05/2026 às 17:00")):
+        await callback_handler(update, context)
+
+    query.edit_message_text.assert_called_once()
+    context.bot.send_message.assert_called_once()
+
+
 def test_nudge_keyboard_structure() -> None:
     from alfred.bot.keyboards import nudge_keyboard
     from alfred.bot.signing import verify_callback
