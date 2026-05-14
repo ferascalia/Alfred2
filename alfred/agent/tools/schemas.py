@@ -378,12 +378,12 @@ SEND_CALENDAR_INVITE_SCHEMA: dict[str, Any] = {
 
 CALENDAR_TOOLS: list[dict[str, Any]] = [SEND_CALENDAR_INVITE_SCHEMA]
 
-# ─── Google Calendar tools ──────────────────────────────────────────
+# ─── Calendar integration tools ──────────────────────────────────────
 
 LIST_CALENDAR_EVENTS_SCHEMA: dict[str, Any] = {
     "name": "list_calendar_events",
     "description": (
-        "Lista eventos da agenda Google do usuário em um período. "
+        "Lista eventos da agenda do usuário em um período. "
         "Use quando o usuário perguntar sobre compromissos, reuniões ou eventos "
         "da agenda ('o que tenho amanhã?', 'minha agenda da semana', 'tenho reunião quinta?'). "
         "Requer que o usuário tenha conectado a agenda via /connect."
@@ -411,7 +411,7 @@ LIST_CALENDAR_EVENTS_SCHEMA: dict[str, Any] = {
 CREATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
     "name": "create_calendar_event",
     "description": (
-        "Cria um evento na agenda Google do usuário. "
+        "Cria um evento na agenda do usuário. "
         "Use quando o usuário pedir para agendar reunião, compromisso ou evento. "
         "IMPORTANTE: use o formato 'Agendando:' para confirmar com o usuário antes de executar. "
         "Requer que o usuário tenha conectado a agenda via /connect."
@@ -443,7 +443,7 @@ CREATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
 UPDATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
     "name": "update_calendar_event",
     "description": (
-        "Atualiza um evento existente na agenda Google. "
+        "Atualiza um evento existente na agenda. "
         "Use quando o usuário pedir para mudar horário, local ou detalhes de um evento. "
         "Primeiro use list_calendar_events para encontrar o event_id."
     ),
@@ -460,15 +460,16 @@ UPDATE_CALENDAR_EVENT_SCHEMA: dict[str, Any] = {
     },
 }
 
-GOOGLE_CALENDAR_TOOLS: list[dict[str, Any]] = [
+CALENDAR_INTEGRATION_TOOLS: list[dict[str, Any]] = [
     LIST_CALENDAR_EVENTS_SCHEMA,
     CREATE_CALENDAR_EVENT_SCHEMA,
     UPDATE_CALENDAR_EVENT_SCHEMA,
 ]
+GOOGLE_CALENDAR_TOOLS = CALENDAR_INTEGRATION_TOOLS
 
 # ─── Flat list (backwards-compatible with loop.py) ─────────────────
 
 ALL_TOOL_SCHEMAS: list[dict[str, Any]] = (
     READ_TOOLS + CORE_WRITE_TOOLS + CONTACT_WRITE_TOOLS + ACTIVITY_WRITE_TOOLS
-    + DRAFT_TOOLS + CALENDAR_TOOLS + GOOGLE_CALENDAR_TOOLS
+    + DRAFT_TOOLS + CALENDAR_TOOLS + CALENDAR_INTEGRATION_TOOLS
 )

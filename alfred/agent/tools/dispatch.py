@@ -99,16 +99,31 @@ async def dispatch_tool(
         from alfred.services.calendar import send_calendar_invite_tool
         return await send_calendar_invite_tool(user_id=user_id, **tool_input)
 
-    if tool_name == "list_calendar_events":
-        from alfred.services.google_calendar import list_events
-        return await list_events(user_id=user_id, **tool_input)
-
-    if tool_name == "create_calendar_event":
-        from alfred.services.google_calendar import create_event
-        return await create_event(user_id=user_id, **tool_input)
-
-    if tool_name == "update_calendar_event":
-        from alfred.services.google_calendar import update_event
-        return await update_event(user_id=user_id, **tool_input)
+    if tool_name in ("list_calendar_events", "create_calendar_event", "update_calendar_event"):
+        return await _dispatch_calendar(tool_name, user_id, tool_input)
 
     return f"Ferramenta '{tool_name}' não reconhecida."
+
+
+_CALENDAR_TOOL_METHOD = {
+    "list_calendar_events": "list_events",
+    "create_calendar_event": "create_event",
+    "update_calendar_event": "update_event",
+}
+
+
+async def _dispatch_calendar(tool_name: str, user_id: str, tool_input: dict[str, Any]) -> str:
+    from alfred.services.oauth import get_active_calendar_provider
+    from alfred.integrations import get_provider
+
+    provider_slug = await get_active_calendar_provider(user_id)
+    if not provider_slug:
+        return "Sua agenda não está conectada. Use /connect para vincular."
+
+    provider = get_provider(provider_slug)
+    if not provider:
+        return "Provedor de agenda não configurado."
+
+    method_name = _CALENDAR_TOOL_METHOD[tool_name]
+    handler = getattr(provider, method_name)
+    return await handler(user_id=user_id, **tool_input)

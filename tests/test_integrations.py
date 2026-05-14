@@ -398,3 +398,54 @@ def test_verify_state_invalid():
 
     assert _verify_state("invalid") == (None, None)
     assert _verify_state("google_calendar:12345.badhmac") == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# Dispatch via registry tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_dispatch_list_calendar_events_via_registry():
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from alfred.agent.tools.dispatch import dispatch_tool
+    from alfred.integrations.registry import register, _REGISTRY
+    from alfred.integrations.base import IntegrationProvider, ProviderInfo
+
+    _REGISTRY.clear()
+
+    class MockProvider(IntegrationProvider):
+        def info(self): return ProviderInfo(
+            slug="google_calendar", display_name="GCal", emoji="📅",
+            description="", category="calendar", scopes_summary="",
+        )
+        def build_auth_url(self, state): return ""
+        async def exchange_code(self, code, state): return {}
+        async def refresh_tokens(self, user_id, refresh_token): return None
+        list_events = AsyncMock(return_value="• 15/05/2026 14:00 — Reunião com João")
+        async def create_event(self, user_id, title, start_datetime, end_datetime, **kw): return ""
+        async def update_event(self, user_id, event_id, fields): return ""
+        async def delete_event(self, user_id, event_id): return ""
+
+    register(MockProvider())
+
+    with patch("alfred.services.oauth.get_active_calendar_provider", AsyncMock(return_value="google_calendar")):
+        result = await dispatch_tool(
+            "list_calendar_events",
+            {"start_date": "2026-05-15"},
+            user_id="u1",
+        )
+    assert "Reunião com João" in result
+
+
+@pytest.mark.asyncio
+async def test_dispatch_calendar_no_provider():
+    from unittest.mock import AsyncMock, patch
+    from alfred.agent.tools.dispatch import dispatch_tool
+
+    with patch("alfred.services.oauth.get_active_calendar_provider", AsyncMock(return_value=None)):
+        result = await dispatch_tool(
+            "list_calendar_events",
+            {"start_date": "2026-05-15"},
+            user_id="u1",
+        )
+    assert "/connect" in result

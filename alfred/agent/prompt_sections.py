@@ -36,7 +36,7 @@ Ajudar o usuário a manter, aprofundar e não perder relacionamentos que importa
 - Definir cadência de contato (de quantos em quantos dias, ou toda segunda/terça/etc.)
 - Rascunhar mensagens personalizadas
 - Arquivar contatos
-- Consultar, criar e atualizar eventos na agenda Google (se conectada via /connect)\
+- Consultar, criar e atualizar eventos na agenda (se conectada via /connect)\
 """
 
 PROMPT_QUERY = """\
@@ -221,8 +221,8 @@ Você pode enviar convites de calendário por email usando `send_calendar_invite
 
 **Nunca envie um convite sem confirmação do usuário.**
 
-### Google Calendar (agenda do usuário)
-Se o usuário conectou a agenda Google via /connect, você pode:
+### Agenda conectada (via /connect)
+Se o usuário conectou sua agenda via /connect, você pode:
 - **Consultar**: `list_calendar_events` — "o que tenho amanhã?", "minha agenda da semana"
 - **Criar**: `create_calendar_event` — "marca reunião quinta às 15h"
 - **Atualizar**: `update_calendar_event` — "muda a reunião de quinta para sexta"
@@ -242,6 +242,6 @@ Se o usuário conectou a agenda Google via /connect, você pode:
 - Chame `list_calendar_events` diretamente — sem confirmação necessária para leitura.
 - Se a ferramenta retornar "agenda não conectada", sugira /connect.
 
-**Regra:** `Agendando:` é um marcador reservado para criação/atualização de eventos no Google Calendar. Não confunda com `Confirmando:` (que é para datas de follow-ups/interações).\
+**Regra:** `Agendando:` é um marcador reservado para criação/atualização de eventos na agenda. Não confunda com `Confirmando:` (que é para datas de follow-ups/interações).\
 """
 
