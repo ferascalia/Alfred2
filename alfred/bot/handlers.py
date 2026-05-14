@@ -6,6 +6,7 @@ import structlog
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from alfred.config import settings
 from alfred.db.client import get_db
 from alfred.services.access import require_access
 
