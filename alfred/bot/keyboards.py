@@ -43,6 +43,21 @@ def calendar_confirm_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
     ]])
 
 
+def scheduling_choice_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        _btn("📅 Google Calendar", f"schedulechoice:calendar:{confirmation_id}"),
+        _btn("🔔 Lembrete", f"schedulechoice:followup:{confirmation_id}"),
+        _btn("✏️ Corrigir", f"schedulechoice:edit:{confirmation_id}"),
+    ]])
+
+
+def reminder_followup_keyboard(confirmation_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        _btn("✅ Sim, lembrar", f"reminderalso:yes:{confirmation_id}"),
+        _btn("❌ Só o Calendar", f"reminderalso:no:{confirmation_id}"),
+    ]])
+
+
 def import_confirm_keyboard(file_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         _btn("✅ Confirmar importação", f"import:confirm:{file_id}"),

@@ -67,6 +67,40 @@ def test_onboarding_keyboard_has_four_buttons() -> None:
         assert len(btn.callback_data.encode()) <= 64
 
 
+def test_scheduling_choice_keyboard_has_three_buttons() -> None:
+    from alfred.bot.keyboards import scheduling_choice_keyboard
+    from alfred.bot.signing import verify_callback
+
+    kb = scheduling_choice_keyboard("abc123")
+    buttons = [btn for row in kb.inline_keyboard for btn in row]
+    assert len(buttons) == 3
+    datas = [verify_callback(btn.callback_data) for btn in buttons]
+    assert "schedulechoice:calendar:abc123" in datas
+    assert "schedulechoice:followup:abc123" in datas
+    assert "schedulechoice:edit:abc123" in datas
+
+
+def test_scheduling_choice_keyboard_within_64_byte_limit() -> None:
+    from alfred.bot.keyboards import scheduling_choice_keyboard
+
+    kb = scheduling_choice_keyboard("abcdef123456")
+    for row in kb.inline_keyboard:
+        for btn in row:
+            assert len(btn.callback_data.encode()) <= 64
+
+
+def test_reminder_followup_keyboard_has_two_buttons() -> None:
+    from alfred.bot.keyboards import reminder_followup_keyboard
+    from alfred.bot.signing import verify_callback
+
+    kb = reminder_followup_keyboard("xyz789")
+    buttons = [btn for row in kb.inline_keyboard for btn in row]
+    assert len(buttons) == 2
+    datas = [verify_callback(btn.callback_data) for btn in buttons]
+    assert "reminderalso:yes:xyz789" in datas
+    assert "reminderalso:no:xyz789" in datas
+
+
 def test_callback_data_within_64_byte_limit() -> None:
     from alfred.bot.keyboards import nudge_keyboard
 
