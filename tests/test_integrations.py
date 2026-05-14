@@ -449,3 +449,55 @@ async def test_dispatch_calendar_no_provider():
             user_id="u1",
         )
     assert "/connect" in result
+
+
+# ---------------------------------------------------------------------------
+# /connect handler tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_connect_handler_shows_providers():
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from alfred.integrations.registry import register, _REGISTRY
+    from alfred.integrations.base import IntegrationProvider, ProviderInfo
+
+    _REGISTRY.clear()
+
+    class FakeCal(IntegrationProvider):
+        def info(self): return ProviderInfo(
+            slug="google_calendar", display_name="Google Calendar", emoji="📅",
+            description="Ver e criar eventos", category="calendar", scopes_summary="",
+        )
+        def build_auth_url(self, state): return ""
+        async def exchange_code(self, code, state): return {}
+        async def refresh_tokens(self, user_id, refresh_token): return None
+        async def list_events(self, user_id, start_date, **kw): return ""
+        async def create_event(self, user_id, title, start_datetime, end_datetime, **kw): return ""
+        async def update_event(self, user_id, event_id, fields): return ""
+        async def delete_event(self, user_id, event_id): return ""
+
+    register(FakeCal())
+
+    from alfred.bot.handlers import connect_handler
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.message.reply_text = AsyncMock()
+
+    fake_db = MagicMock()
+    fake_db.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(data={"id": "user-1"})
+
+    with (
+        patch("alfred.bot.handlers.get_db", return_value=fake_db),
+        patch("alfred.services.access.get_db", return_value=fake_db),
+        patch("alfred.services.access._get_whitelist", return_value={12345}),
+        patch("alfred.services.oauth.has_integration", AsyncMock(return_value=False)),
+    ):
+        await connect_handler(update, MagicMock())
+
+    call_args = update.message.reply_text.call_args
+    text = call_args[0][0]
+    assert "Google Calendar" in text
+    keyboard = call_args[1]["reply_markup"]
+    buttons = keyboard.inline_keyboard[0]
+    assert "google_calendar" in buttons[0].url

@@ -113,42 +113,50 @@ async def _send_response_with_confirmation(
 
 @require_access
 async def connect_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /connect — show button to connect Google Calendar."""
+    """Handle /connect — show available integrations with connect buttons."""
     if not update.effective_user or not update.message:
         return
 
-    from alfred.bot.oauth_routes import _sign_state
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from alfred.integrations import list_providers
+    from alfred.services.oauth import has_integration
 
     tg_user = update.effective_user
-    state = _sign_state(tg_user.id)
-    connect_url = f"{settings.webhook_url}/oauth/google?telegram_id={tg_user.id}"
-
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("Conectar Google Calendar", url=connect_url),
-    ]])
 
     db = get_db()
     user_result = db.table("users").select("id").eq("telegram_id", tg_user.id).single().execute()
-    if user_result.data:
-        from alfred.services.oauth import has_google_integration
-        if await has_google_integration(user_result.data["id"]):
-            await update.message.reply_text(
-                "Sua agenda Google já está conectada.\n\n"
-                "Para reconectar, clique no botão abaixo.",
-                reply_markup=keyboard,
-            )
-            return
+    user_id = user_result.data["id"] if user_result.data else None
 
-    await update.message.reply_text(
-        "Conecte sua agenda Google para que eu possa:\n\n"
-        "• Ver seus compromissos\n"
-        "• Criar eventos diretamente\n"
-        "• Atualizar reuniões existentes\n\n"
-        "Clique no botão abaixo para autorizar:",
-        reply_markup=keyboard,
-    )
+    providers = list_providers()
+    buttons = []
+    status_lines = []
+
+    for p in providers:
+        is_connected = False
+        if user_id:
+            is_connected = await has_integration(user_id, p.slug)
+
+        connect_url = f"{settings.webhook_url}/oauth/{p.slug}/start?telegram_id={tg_user.id}"
+        label = f"{'✅ ' if is_connected else ''}{p.emoji} {p.display_name}"
+        buttons.append([InlineKeyboardButton(label, url=connect_url)])
+
+        if is_connected:
+            status_lines.append(f"• {p.emoji} {p.display_name} — conectado")
+        else:
+            status_lines.append(f"• {p.emoji} {p.display_name} — {p.description}")
+
+    keyboard = InlineKeyboardMarkup(buttons)
+
+    if any("conectado" in s for s in status_lines):
+        text = "Suas integrações:\n\n" + "\n".join(status_lines) + "\n\nPara reconectar ou adicionar, toque abaixo:"
+    else:
+        text = (
+            "Conecte serviços externos para que eu possa ajudá-lo ainda mais:\n\n"
+            + "\n".join(status_lines)
+            + "\n\nToque no serviço que deseja conectar:"
+        )
+
+    await update.message.reply_text(text, reply_markup=keyboard)
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
