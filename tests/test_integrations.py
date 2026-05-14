@@ -249,3 +249,131 @@ async def test_get_active_calendar_provider_none():
         result = await get_active_calendar_provider("user-1")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Google Calendar Provider tests
+# ---------------------------------------------------------------------------
+
+def test_google_calendar_provider_info():
+    from alfred.integrations.google_calendar import GoogleCalendarProvider
+
+    provider = GoogleCalendarProvider()
+    info = provider.info()
+    assert info.slug == "google_calendar"
+    assert info.category == "calendar"
+    assert info.display_name == "Google Calendar"
+
+
+def test_google_calendar_registered():
+    from alfred.integrations import get_provider
+
+    provider = get_provider("google_calendar")
+    assert provider is not None
+    assert provider.info().slug == "google_calendar"
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_list_events_no_integration():
+    from unittest.mock import AsyncMock, patch
+    from alfred.integrations.google_calendar import GoogleCalendarProvider
+
+    provider = GoogleCalendarProvider()
+    with patch("alfred.integrations.google_calendar.get_tokens", AsyncMock(return_value=None)):
+        result = await provider.list_events("user-1", start_date="2026-05-15")
+    assert "/connect" in result
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_list_events_success():
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from alfred.integrations.google_calendar import GoogleCalendarProvider
+
+    provider = GoogleCalendarProvider()
+    fake_tokens = {"access_token": "tok", "refresh_token": "ref", "token_expires_at": None, "scopes": []}
+    fake_service = MagicMock()
+    fake_service.events.return_value.list.return_value.execute.return_value = {
+        "items": [
+            {"summary": "Reunião com João", "start": {"dateTime": "2026-05-15T14:00:00-03:00"}, "location": "Google Meet"},
+            {"summary": "Almoço", "start": {"date": "2026-05-16"}},
+        ]
+    }
+
+    with (
+        patch("alfred.integrations.google_calendar.get_tokens", AsyncMock(return_value=fake_tokens)),
+        patch("alfred.integrations.google_calendar._build_google_service", return_value=fake_service),
+    ):
+        result = await provider.list_events("user-1", start_date="2026-05-15", end_date="2026-05-16")
+
+    assert "Reunião com João" in result
+    assert "Google Meet" in result
+    assert "Almoço" in result
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_create_event_success():
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from alfred.integrations.google_calendar import GoogleCalendarProvider
+
+    provider = GoogleCalendarProvider()
+    fake_tokens = {"access_token": "tok", "refresh_token": "ref", "token_expires_at": None, "scopes": []}
+    fake_service = MagicMock()
+    fake_service.events.return_value.insert.return_value.execute.return_value = {
+        "id": "event123",
+        "htmlLink": "https://calendar.google.com/event/event123",
+    }
+
+    with (
+        patch("alfred.integrations.google_calendar.get_tokens", AsyncMock(return_value=fake_tokens)),
+        patch("alfred.integrations.google_calendar._build_google_service", return_value=fake_service),
+    ):
+        result = await provider.create_event(
+            "user-1",
+            title="Reunião com João",
+            start_datetime="2026-05-15T14:00:00",
+            end_datetime="2026-05-15T15:00:00",
+            location="Google Meet",
+        )
+
+    assert "Evento criado" in result
+    assert "Reunião com João" in result
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_update_event_success():
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from alfred.integrations.google_calendar import GoogleCalendarProvider
+
+    provider = GoogleCalendarProvider()
+    fake_tokens = {"access_token": "tok", "refresh_token": "ref", "token_expires_at": None, "scopes": []}
+    fake_service = MagicMock()
+    fake_service.events.return_value.patch.return_value.execute.return_value = {
+        "id": "event123", "summary": "Reunião atualizada",
+    }
+
+    with (
+        patch("alfred.integrations.google_calendar.get_tokens", AsyncMock(return_value=fake_tokens)),
+        patch("alfred.integrations.google_calendar._build_google_service", return_value=fake_service),
+    ):
+        result = await provider.update_event("user-1", event_id="event123", fields={"title": "Reunião atualizada"})
+
+    assert "Evento atualizado" in result
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_delete_event_success():
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from alfred.integrations.google_calendar import GoogleCalendarProvider
+
+    provider = GoogleCalendarProvider()
+    fake_tokens = {"access_token": "tok", "refresh_token": "ref", "token_expires_at": None, "scopes": []}
+    fake_service = MagicMock()
+    fake_service.events.return_value.delete.return_value.execute.return_value = None
+
+    with (
+        patch("alfred.integrations.google_calendar.get_tokens", AsyncMock(return_value=fake_tokens)),
+        patch("alfred.integrations.google_calendar._build_google_service", return_value=fake_service),
+    ):
+        result = await provider.delete_event("user-1", event_id="event123")
+
+    assert "removido" in result
