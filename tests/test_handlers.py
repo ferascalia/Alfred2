@@ -83,6 +83,56 @@ async def test_message_handler_calls_agent() -> None:
     assert "Entendido" in update.message.reply_text.call_args[0][0]
 
 
+def test_has_scheduling_choice_detects_marker() -> None:
+    from alfred.bot.handlers import _has_scheduling_choice
+
+    assert _has_scheduling_choice(
+        "Escolha como agendar:\n• Hugo Oliveira — 14/05/2026 às 17:00"
+    )
+
+
+def test_has_scheduling_choice_case_insensitive() -> None:
+    from alfred.bot.handlers import _has_scheduling_choice
+
+    assert _has_scheduling_choice("ESCOLHA COMO AGENDAR:\n• Hugo — 14/05/2026")
+    assert _has_scheduling_choice("escolha como agendar:\n• Hugo — 14/05/2026")
+
+
+def test_has_scheduling_choice_rejects_mid_text() -> None:
+    from alfred.bot.handlers import _has_scheduling_choice
+
+    assert not _has_scheduling_choice(
+        "Feito! Escolha como agendar: algo"
+    )
+
+
+def test_has_scheduling_choice_rejects_empty() -> None:
+    from alfred.bot.handlers import _has_scheduling_choice
+
+    assert not _has_scheduling_choice("")
+
+
+def test_has_reminder_followup_detects_marker() -> None:
+    from alfred.bot.handlers import _has_reminder_followup
+
+    assert _has_reminder_followup(
+        "Evento criado na agenda.\n\nLembrete no Telegram?"
+    )
+
+
+def test_has_reminder_followup_case_insensitive() -> None:
+    from alfred.bot.handlers import _has_reminder_followup
+
+    assert _has_reminder_followup("LEMBRETE NO TELEGRAM?")
+    assert _has_reminder_followup("lembrete no telegram?")
+
+
+def test_has_reminder_followup_rejects_unrelated() -> None:
+    from alfred.bot.handlers import _has_reminder_followup
+
+    assert not _has_reminder_followup("Confirmando: Hugo — 14/05/2026")
+
+
 def test_nudge_keyboard_structure() -> None:
     from alfred.bot.keyboards import nudge_keyboard
     from alfred.bot.signing import verify_callback

@@ -51,6 +51,22 @@ def _has_calendar_confirmation(text: str) -> bool:
     )
 
 
+def _has_scheduling_choice(text: str) -> bool:
+    """Check if any line starts with 'Escolha como agendar:' (case-insensitive)."""
+    return any(
+        re.match(r"^\s*escolha como agendar\s*:", line, re.IGNORECASE)
+        for line in text.split("\n")
+    )
+
+
+def _has_reminder_followup(text: str) -> bool:
+    """Check if any line starts with 'Lembrete no Telegram?' (case-insensitive)."""
+    return any(
+        re.match(r"^\s*lembrete no telegram\s*\??", line, re.IGNORECASE)
+        for line in text.split("\n")
+    )
+
+
 async def _send_response_with_confirmation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -62,7 +78,22 @@ async def _send_response_with_confirmation(
     if not update.message:
         return
 
-    if _has_calendar_confirmation(response):
+    if _has_scheduling_choice(response):
+        from alfred.bot.keyboards import scheduling_choice_keyboard
+
+        confirmation_id = uuid.uuid4().hex[:12]
+        if context.user_data is not None:
+            context.user_data[f"schedulechoice:{confirmation_id}"] = {
+                "telegram_id": telegram_id,
+                "user_name": user_name,
+                "confirmation_text": response,
+            }
+        await update.message.reply_text(
+            response,
+            parse_mode="Markdown",
+            reply_markup=scheduling_choice_keyboard(confirmation_id),
+        )
+    elif _has_calendar_confirmation(response):
         from alfred.bot.keyboards import calendar_confirm_keyboard
 
         confirmation_id = uuid.uuid4().hex[:12]
@@ -106,6 +137,21 @@ async def _send_response_with_confirmation(
             response,
             parse_mode="Markdown",
             reply_markup=confirm_keyboard("contactconfirm", confirmation_id),
+        )
+    elif _has_reminder_followup(response):
+        from alfred.bot.keyboards import reminder_followup_keyboard
+
+        confirmation_id = uuid.uuid4().hex[:12]
+        if context.user_data is not None:
+            context.user_data[f"reminderalso:{confirmation_id}"] = {
+                "telegram_id": telegram_id,
+                "user_name": user_name,
+                "confirmation_text": response,
+            }
+        await update.message.reply_text(
+            response,
+            parse_mode="Markdown",
+            reply_markup=reminder_followup_keyboard(confirmation_id),
         )
     else:
         await update.message.reply_text(response, parse_mode="Markdown")
