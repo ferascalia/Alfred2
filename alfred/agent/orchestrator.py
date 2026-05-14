@@ -15,6 +15,9 @@ from alfred.agent.context import AgentContext, AgentResult
 from alfred.agent.guardrails.date_confirmation import CONFIRMATION_APPROVED
 
 CONTACT_CONFIRMATION_APPROVED = "[CADASTRO APROVADO]"
+SCHEDULE_CHOICE_CALENDAR = "[ESCOLHA AGENDA: calendar]"
+SCHEDULE_CHOICE_FOLLOWUP = "[ESCOLHA AGENDA: followup]"
+REMINDER_ALSO = "[LEMBRETE TAMBÉM: sim]"
 from alfred.agent.history import (
     get_or_create_user,
     load_history,
@@ -76,6 +79,18 @@ async def run_agent(telegram_id: int, user_name: str, message: str) -> str:
     if message.startswith(CONTACT_CONFIRMATION_APPROVED):
         log.info("orchestrator.contact_confirmation_bypass")
         result = await ContactAgent().run(ctx)
+        await save_message(user_id, "assistant", result.text)
+        return result.text
+
+    if message.startswith(SCHEDULE_CHOICE_CALENDAR) or message.startswith(SCHEDULE_CHOICE_FOLLOWUP):
+        log.info("orchestrator.scheduling_choice_bypass", choice=message.split("]")[0] + "]")
+        result = await ActivityAgent().run(ctx)
+        await save_message(user_id, "assistant", result.text)
+        return result.text
+
+    if message.startswith(REMINDER_ALSO):
+        log.info("orchestrator.reminder_also_bypass")
+        result = await ActivityAgent().run(ctx)
         await save_message(user_id, "assistant", result.text)
         return result.text
 
