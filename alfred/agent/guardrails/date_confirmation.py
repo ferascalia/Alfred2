@@ -7,8 +7,6 @@ CONFIRMATION_APPROVED = "[CONFIRMAÇÃO APROVADA]"
 _DATE_NUMERIC = re.compile(
     r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b"
 )
-_SCHEDULING_CHOICE_PREFIX = re.compile(r"^\s*escolha como agendar\s*:", re.IGNORECASE)
-_REMINDER_FOLLOWUP_PREFIX = re.compile(r"^\s*lembrete no telegram\s*\??", re.IGNORECASE)
 
 
 def is_date_confirmation_prompt(response_text: str) -> bool:
@@ -29,23 +27,3 @@ def is_date_confirmation_prompt(response_text: str) -> bool:
     if not _DATE_NUMERIC.search(response_text):
         return False
     return True
-
-
-def is_scheduling_disambiguation(response_text: str) -> bool:
-    """True when the agent is asking the user to choose between Calendar and Reminder."""
-    if not response_text:
-        return False
-    return any(
-        _SCHEDULING_CHOICE_PREFIX.match(line)
-        for line in response_text.split("\n")
-    )
-
-
-def is_reminder_followup_prompt(response_text: str) -> bool:
-    """True when the agent is asking if the user also wants a Telegram reminder."""
-    if not response_text:
-        return False
-    return any(
-        _REMINDER_FOLLOWUP_PREFIX.match(line)
-        for line in response_text.split("\n")
-    )

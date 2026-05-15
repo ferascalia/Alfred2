@@ -92,3 +92,66 @@ class TestGuardrailActionSatisfied:
     def test_action_satisfied(self, msg, tools):
         missing = _detect_pending_actions(msg, tools)
         assert missing == [], f"Action '{msg}' with tools {tools} should be satisfied"
+
+
+class TestBareFutureDateNotBlocked:
+    """Bare future dates without follow-up keywords should NOT trigger the guardrail."""
+
+    @pytest.mark.parametrize(
+        "msg,tools",
+        [
+            ("marca reunião com Hugo amanhã 9h", set()),
+            ("marca com Hugo amanhã 9h", set()),
+            ("agenda evento com Maria quinta", set()),
+            ("cria evento com o time sexta às 14h", set()),
+        ],
+        ids=[
+            "reuniao-amanha",
+            "marca-amanha",
+            "evento-quinta",
+            "cria-evento-sexta",
+        ],
+    )
+    def test_bare_date_not_blocked(self, msg, tools):
+        missing = _detect_pending_actions(msg, tools)
+        assert missing == [], f"Bare future date '{msg}' was incorrectly blocked: {missing}"
+
+
+class TestCalendarToolSatisfiesScheduled:
+    """Calendar tools in tools_called should satisfy the scheduling requirement."""
+
+    @pytest.mark.parametrize(
+        "msg,tools",
+        [
+            ("marca reunião amanhã", {"create_calendar_event"}),
+            ("marca pro Hugo amanhã", {"send_calendar_invite"}),
+        ],
+        ids=[
+            "create-calendar-event",
+            "send-calendar-invite",
+        ],
+    )
+    def test_calendar_tool_satisfies(self, msg, tools):
+        missing = _detect_pending_actions(msg, tools)
+        assert missing == [], f"Calendar tool should satisfy '{msg}' but got: {missing}"
+
+
+class TestInteractionPlusFutureDateStillBlocks:
+    """Interaction report + future date should still demand set_follow_up."""
+
+    @pytest.mark.parametrize(
+        "msg,tools",
+        [
+            ("falei com Hugo, amanhã vamos almoçar", set()),
+            ("encontrei o Hugo e combinamos de almoçar amanhã", set()),
+        ],
+        ids=[
+            "falei-amanha",
+            "encontrei-amanha",
+        ],
+    )
+    def test_interaction_plus_date_blocks(self, msg, tools):
+        missing = _detect_pending_actions(msg, tools)
+        assert any(
+            "set_follow_up" in m for m in missing
+        ), f"Interaction+date '{msg}' should require set_follow_up but got: {missing}"

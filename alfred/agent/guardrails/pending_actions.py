@@ -91,7 +91,6 @@ def detect_pending_actions(user_message: str, tools_called: set[str]) -> list[st
     has_cadence = any(re.search(p, msg) for p in _CADENCE_PATTERNS)
     future_dates = detect_future_dates(user_message)
     has_followup_fallback = any(re.search(p, msg) for p in _FOLLOWUP_FALLBACK_PATTERNS)
-    has_followup = bool(future_dates) or has_followup_fallback
 
     if has_interaction and "log_interaction" not in tools_called:
         missing.append(
@@ -99,16 +98,21 @@ def detect_pending_actions(user_message: str, tools_called: set[str]) -> list[st
             "mas não registrou a interação."
         )
 
+    _SCHEDULING_TOOLS = {
+        "create_calendar_event", "send_calendar_invite",
+        "list_calendar_events", "update_calendar_event",
+    }
     scheduled = (
         "set_follow_up" in tools_called
         or "set_cadence" in tools_called
         or "list_follow_ups" in tools_called
+        or bool(tools_called & _SCHEDULING_TOOLS)
     )
     if has_cadence and not scheduled and not is_query:
         missing.append(
             "• `set_cadence` — você pediu cadência recorrente mas não configurou."
         )
-    elif has_followup and not scheduled and not is_query:
+    elif has_followup_fallback and not scheduled and not is_query:
         if future_dates:
             snippet, dt = future_dates[0]
             date_iso = dt.date().isoformat()
@@ -122,5 +126,13 @@ def detect_pending_actions(user_message: str, tools_called: set[str]) -> list[st
                 "• `set_follow_up` — você mencionou um prazo, data futura ou 'me lembra' "
                 "mas não agendou o follow-up. Calcule a data absoluta (YYYY-MM-DD) a partir de hoje."
             )
+    elif bool(future_dates) and has_interaction and not scheduled and not is_query:
+        snippet, dt = future_dates[0]
+        date_iso = dt.date().isoformat()
+        missing.append(
+            f"• `set_follow_up` — você mencionou '{snippet.strip()}' "
+            f"(interpretado como {date_iso}) junto com uma interação, mas não agendou. "
+            f"Chame set_follow_up com date='{date_iso}'."
+        )
 
     return missing
