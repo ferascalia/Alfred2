@@ -75,3 +75,54 @@ def test_hallucinated_past_tense_confirmation_is_not_bypassed() -> None:
 
     assert not _is_date_confirmation_prompt("Marquei o follow-up do Daniel para 15/04/2026 ✅")
     assert not _is_date_confirmation_prompt("Já registrei a conversa de 14/04/2026.")
+
+
+# ── Scheduling disambiguation tests ──
+
+
+def test_scheduling_disambiguation_detected() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_scheduling_disambiguation
+
+    text = (
+        "Escolha como agendar:\n"
+        "• Hugo Rosa — 15/05/2026 (quinta) às 09:00"
+    )
+    assert is_scheduling_disambiguation(text)
+
+
+def test_scheduling_disambiguation_case_insensitive() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_scheduling_disambiguation
+
+    assert is_scheduling_disambiguation("escolha como agendar: Hugo — 15/05")
+    assert is_scheduling_disambiguation("ESCOLHA COMO AGENDAR: teste")
+
+
+def test_scheduling_disambiguation_not_mid_sentence() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_scheduling_disambiguation
+
+    assert not is_scheduling_disambiguation("Posso te ajudar! Escolha como agendar: ...")
+
+
+def test_scheduling_disambiguation_empty() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_scheduling_disambiguation
+
+    assert not is_scheduling_disambiguation("")
+
+
+def test_reminder_followup_detected() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_reminder_followup_prompt
+
+    assert is_reminder_followup_prompt("Lembrete no Telegram?")
+    assert is_reminder_followup_prompt("Lembrete no Telegram?\nQuer que eu crie um lembrete também?")
+
+
+def test_reminder_followup_empty() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_reminder_followup_prompt
+
+    assert not is_reminder_followup_prompt("")
+
+
+def test_reminder_followup_not_mid_sentence() -> None:
+    from alfred.agent.guardrails.date_confirmation import is_reminder_followup_prompt
+
+    assert not is_reminder_followup_prompt("Evento criado! Lembrete no Telegram?")

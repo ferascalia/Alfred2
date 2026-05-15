@@ -13,7 +13,11 @@ from anthropic.types import TextBlock, ToolResultBlockParam, ToolUseBlock
 
 from alfred.agent.client import get_anthropic
 from alfred.agent.context import AgentContext, AgentResult
-from alfred.agent.guardrails.date_confirmation import is_date_confirmation_prompt
+from alfred.agent.guardrails.date_confirmation import (
+    is_date_confirmation_prompt,
+    is_reminder_followup_prompt,
+    is_scheduling_disambiguation,
+)
 from alfred.agent.guardrails.pending_actions import detect_pending_actions
 from alfred.agent.guardrails.truthfulness import validate_response_truthfulness
 from alfred.agent.history import build_partial_report
@@ -159,6 +163,18 @@ class BaseAgent(ABC):
                         "guardrail.date_confirmation_bypass",
                         preview=preview_text[:240],
                         tools_called=list(tools_called),
+                    )
+                    return AgentResult(
+                        text=preview_text,
+                        tools_called=tools_called,
+                        tool_calls_log=tool_calls_log,
+                    )
+
+                # Scheduling disambiguation bypass
+                if is_scheduling_disambiguation(preview_text) or is_reminder_followup_prompt(preview_text):
+                    log.info(
+                        "guardrail.scheduling_disambiguation_bypass",
+                        preview=preview_text[:240],
                     )
                     return AgentResult(
                         text=preview_text,
